@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>hill rider</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ── welcome screen ── -->
+  <div id="welcome-screen">
+    <div class="overlay-panel">
+      <div class="logo">hill<em>rider</em></div>
+      <p class="sub">go fast. mind the limit. don't explode.</p>
+
+      <div class="controls-row">
+        <span class="ctrl-item"><kbd>→</kbd> gas</span>
+        <span class="ctrl-item"><kbd>←</kbd> brake</span>
+        <span class="ctrl-item"><kbd>↓</kbd> hard brake</span>
+        <span class="ctrl-item"><kbd>↑</kbd> boost</span>
+      </div>
+
+      <!-- mode selector -->
+      <div class="section-label">select mode</div>
+      <div id="mode-picker">
+        <button class="mode-btn active" data-mode="easy">
+          <span class="mode-name">easy</span>
+          <span class="mode-desc">gentle hills, forgiving limits</span>
+        </button>
+        <button class="mode-btn" data-mode="medium">
+          <span class="mode-name">medium</span>
+          <span class="mode-desc">rolling terrain, stricter zones</span>
+        </button>
+        <button class="mode-btn" data-mode="hard">
+          <span class="mode-name">hard</span>
+          <span class="mode-desc">wild hills, tight limits, more obstacles</span>
+        </button>
+        <button class="mode-btn" data-mode="water">
+          <span class="mode-name">🌊 all water</span>
+          <span class="mode-desc">cross rivers or sink trying</span>
+        </button>
+      </div>
+
+      <div id="lifetime-block">
+        <span class="lt-label">lifetime pts</span>
+        <span class="lt-value" id="lifetime-display">0</span>
+      </div>
+
+      <div class="welcome-btns">
+        <button class="pill-btn" id="start-btn">start</button>
+        <button class="pill-btn ghost" id="open-shop-welcome">shop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── HUD ── -->
+  <div id="hud">
+    <div id="speedometer">
+      <canvas id="speedo-canvas" width="110" height="110"></canvas>
+      <div id="speed-digits">0</div>
+      <div id="speed-unit">mph</div>
+    </div>
+
+    <div id="hud-center">
+      <div id="mode-badge"></div>
+    </div>
+
+    <div id="hud-right">
+      <div class="hud-chip">
+        <span class="chip-label">score</span>
+        <span class="chip-val" id="score">0</span>
+      </div>
+      <div class="hud-chip">
+        <span class="chip-label">total</span>
+        <span class="chip-val" id="total-score">0</span>
+      </div>
+      <div class="hud-chip hidden" id="limit-chip">
+        <span class="chip-label">limit</span>
+        <span class="chip-val" id="limit-val">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── boost menu (in-game, toggled by Tab) ── -->
+  <div id="boost-menu" class="hidden">
+    <div class="boost-menu-inner">
+      <div class="boost-menu-title">use a boost <kbd>tab</kbd> to close</div>
+      <div id="boost-menu-grid"></div>
+    </div>
+  </div>
+
+  <!-- ── boost tab hint ── -->
+  <div id="boost-hint">boosts <kbd>tab</kbd></div>
+
+  <!-- ── death + shop screen ── -->
+  <div id="death-screen" class="hidden">
+    <div class="overlay-panel death-panel">
+      <div class="death-emoji">💥</div>
+      <div class="death-title">you exploded</div>
+      <div class="death-reason" id="death-reason"></div>
+
+      <div class="score-row">
+        <div class="score-col">
+          <div class="sc-label">this run</div>
+          <div class="sc-val" id="final-score">0</div>
+        </div>
+        <div class="score-divider"></div>
+        <div class="score-col">
+          <div class="sc-label">lifetime pts</div>
+          <div class="sc-val" id="lifetime-total">0</div>
+        </div>
+      </div>
+
+      <div class="section-label">power-up shop</div>
+      <div id="shop-grid"></div>
+
+      <div class="death-btns">
+        <button class="pill-btn" id="restart-btn">try again</button>
+        <button class="pill-btn ghost" id="change-mode-btn">change mode</button>
+        <button class="pill-btn ghost danger" id="reset-btn">reset all</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── standalone shop (from welcome) ── -->
+  <div id="shop-screen" class="hidden">
+    <div class="overlay-panel death-panel">
+      <div class="death-title">shop</div>
+      <div class="death-reason">spend lifetime points on power-ups for your next run</div>
+      <div class="score-row" style="margin-bottom:16px">
+        <div class="score-col">
+          <div class="sc-label">lifetime pts</div>
+          <div class="sc-val" id="shop-lifetime">0</div>
+        </div>
+      </div>
+      <div class="section-label">power-ups</div>
+      <div id="shop-grid-welcome"></div>
+      <div class="death-btns" style="margin-top:16px">
+        <button class="pill-btn ghost" id="close-shop-btn">back</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── active powerup badges ── -->
+  <div id="active-powerups"></div>
+
+  <!-- ── toast ── -->
+  <div id="toast"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>
