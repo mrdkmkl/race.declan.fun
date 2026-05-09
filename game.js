@@ -22,7 +22,143 @@ store.lifetime      = Number(store.lifetime)   || 0;
 store.ownedPowerups = store.ownedPowerups       || [];
 store.powerupCounts = store.powerupCounts       || {};
 store.boostCounts   = store.boostCounts         || {};
+store.soundEnabled  = store.soundEnabled  !== false;  // default true
+store.musicEnabled  = store.musicEnabled  !== false;  // default true
+store.diffModifier  = store.diffModifier  || 'normal'; // 'easy' | 'normal' | 'hard'
 saveStore(store);
+
+// ══════════════════════════════════════════════════
+//  AUDIO SYSTEM (Web Audio API)
+// ══════════════════════════════════════════════════
+let audioCtx = null;
+let engineOsc = null, engineGain = null;
+let musicInterval = null;
+const MUSIC_NOTES = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63, 261.63, 293.66];
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { console.warn('Web Audio not available', e); }
+}
+
+function startEngine() {
+  if (!audioCtx || !store.soundEnabled || engineOsc) return;
+  engineGain = audioCtx.createGain();
+  engineGain.gain.value = 0;
+  engineGain.connect(audioCtx.destination);
+  const distortion = audioCtx.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = x * 0.4; }
+  distortion.curve = curve;
+  engineOsc = audioCtx.createOscillator();
+  engineOsc.type = 'sawtooth';
+  engineOsc.frequency.value = 80;
+  engineOsc.connect(distortion);
+  distortion.connect(engineGain);
+  engineOsc.start();
+}
+
+function stopEngine() {
+  try { if (engineOsc) { engineOsc.stop(); engineOsc = null; } } catch(e) {}
+  try { if (engineGain) { engineGain.disconnect(); engineGain = null; } } catch(e) {}
+}
+
+function updateEngineSound(speed) {
+  if (!audioCtx || !store.soundEnabled) { stopEngine(); return; }
+  if (!engineOsc) startEngine();
+  if (!engineOsc) return;
+  const targetVol = Math.min(speed / 500 * 0.07 + 0.005, 0.08);
+  const targetFreq = 70 + speed * 1.1 + (state.boostActive ? 120 : 0);
+  engineGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.06);
+  engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.04);
+}
+
+function playSound(type) {
+  if (!audioCtx || !store.soundEnabled) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  if (type === 'boost') {
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.22);
+    gain.gain.setValueAtTime(0.10, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    osc.start(now); osc.stop(now + 0.32);
+  } else if (type === 'coin') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09);
+    gain.gain.setValueAtTime(0.09, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+    osc.start(now); osc.stop(now + 0.13);
+  } else if (type === 'crash') {
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(200, now);
+    osc.frequency.exponentialRampToValueAtTime(35, now + 0.55);
+    gain.gain.setValueAtTime(0.18, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc.start(now); osc.stop(now + 0.65);
+    // add noise layer
+    const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.4, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    const ng = audioCtx.createGain();
+    ng.gain.setValueAtTime(0.14, now); ng.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    src.connect(ng); ng.connect(audioCtx.destination);
+    src.start(now);
+  } else if (type === 'nitro') {
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(700, now + 0.28);
+    gain.gain.setValueAtTime(0.09, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    osc.start(now); osc.stop(now + 0.38);
+  } else if (type === 'zone_enter') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now); osc.frequency.setValueAtTime(330, now + 0.08);
+    gain.gain.setValueAtTime(0.07, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc.start(now); osc.stop(now + 0.2);
+  } else if (type === 'overspeed') {
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(660, now);
+    gain.gain.setValueAtTime(0.06, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.start(now); osc.stop(now + 0.1);
+  }
+}
+
+let _musicNoteIdx = 0;
+function startMusic() {
+  if (!audioCtx || !store.musicEnabled || musicInterval) return;
+  function playNote() {
+    if (!store.musicEnabled || !audioCtx) { stopMusic(); return; }
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const now  = audioCtx.currentTime;
+    const freq = MUSIC_NOTES[_musicNoteIdx % MUSIC_NOTES.length] * 0.5;
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.5);
+    // bass note every 4 beats
+    if (_musicNoteIdx % 4 === 0) {
+      const b = audioCtx.createOscillator(), bg = audioCtx.createGain();
+      b.type = 'sine'; b.frequency.value = freq * 0.5;
+      bg.gain.setValueAtTime(0.04, now); bg.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      b.connect(bg); bg.connect(audioCtx.destination);
+      b.start(now); b.stop(now + 0.85);
+    }
+    _musicNoteIdx++;
+  }
+  playNote();
+  musicInterval = setInterval(playNote, 480);
+}
+
+function stopMusic() {
+  if (musicInterval) { clearInterval(musicInterval); musicInterval = null; }
+}
 
 // ══════════════════════════════════════════════════
 //  MODE CONFIG
@@ -45,7 +181,7 @@ const POWERUP_DEFS = [
   { id:'double_score',  name:'2× score',       desc:'all points doubled this run',                icon:'✕2', baseCost:1200 },
   { id:'triple_score',  name:'3× score',       desc:'all points tripled this run',                icon:'✕3', baseCost:3000 },
   { id:'slow_zones',    name:'lenient limits', desc:'speed limits +60% higher this run',          icon:'🛡', baseCost:900  },
-  { id:'score_saver',   name:'score saver',    desc:'keep 60% of score if you explode',           icon:'🪙', baseCost:1500 },
+  { id:'score_saver',   name:'score saver',    desc:'bank 100% of score on death (default: 60%)',      icon:'🪙', baseCost:1500 },
   { id:'turbo_start',   name:'turbo start',    desc:'begin at 80 mph with active boost',          icon:'⚡', baseCost:700  },
   { id:'nitro_reserve', name:'nitro reserve',  desc:'start with 3 nitro charges',                 icon:'🔋', baseCost:1000 },
   { id:'ghost',         name:'ghost mode',     desc:'pass through obstacles safely',              icon:'👻', baseCost:2000 },
@@ -142,9 +278,12 @@ function exitToMenu() {
   hideSpeedWarning();
   alertOverlay.hideAll();
   dismissMathUI();
+  stopEngine();
+  stopMusic();
   const w = document.getElementById('welcome-screen');
   w.style.display = ''; w.classList.remove('fade-out');
   refreshAllLifetimeDisplays();
+  updateModifierBanner();
 }
 
 // ══════════════════════════════════════════════════
@@ -251,7 +390,10 @@ function maybeSpawnEntities() {
   if (!m.noZones && !activePowerups.has('no_zones') && ahead > nextZoneAt) {
     const bases = m.zoneBase.map(b => Math.max(28, Math.round(b / (1 + (diff - 1) * 0.55))));
     const base  = bases[Math.floor(Math.random() * bases.length)];
-    const limit = activePowerups.has('slow_zones') ? Math.round(base * 1.6) : base;
+    let limit = activePowerups.has('slow_zones') ? Math.round(base * 1.6) : base;
+    // difficulty modifier tweaks
+    if (store.diffModifier === 'easy') limit = Math.round(limit * 1.5);
+    if (store.diffModifier === 'hard') limit = Math.round(limit * 0.5);
     const len   = Math.max(250, (400 + Math.random() * 500) * (1 + (diff - 1) * 0.4));
     state.zones.push({ wx: nextZoneAt, len, limit });
     nextZoneAt += (m.zoneInterval / diff) * (0.8 + Math.random() * 0.4);
@@ -264,14 +406,25 @@ function maybeSpawnEntities() {
   }
 
   // obstacles
-  if (!m.noObs && !activePowerups.has('no_obstacles') && ahead > nextObsAt) {
+  const skipObs = m.noObs || activePowerups.has('no_obstacles') || store.diffModifier === 'easy';
+  if (!skipObs && ahead > nextObsAt) {
     const type = Math.random() < 0.5 ? 'rock' : 'log';
     state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9, type, hit: false });
+    // hard modifier: 3× obstacles (spawn 2 extra)
+    const extraObs = store.diffModifier === 'hard' ? 2 : 0;
+    for (let ei = 0; ei < extraObs; ei++) {
+      state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + (ei + 1) * (140 + Math.random() * 80),
+        type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+    }
     if (diff > 1.8 && Math.random() < 0.35) {
       state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + 180 + Math.random() * 120,
         type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
     }
-    nextObsAt += (m.obsInterval / diff) * (0.75 + Math.random() * 0.5);
+    // hard modifier: also tighten interval ÷3
+    const obsIntervalMod = store.diffModifier === 'hard' ? 3 : 1;
+    nextObsAt += (m.obsInterval / diff / obsIntervalMod) * (0.75 + Math.random() * 0.5);
+  } else if (skipObs && ahead > nextObsAt) {
+    nextObsAt += (m.obsInterval / diff) * (0.75 + Math.random() * 0.5); // keep advancing even when skipped
   }
 
   // coins
@@ -947,7 +1100,7 @@ function updateProximityAlerts() {
     const zone = getActiveZone();
     if (zone && !state.zoneImmune) {
       // entering zone
-      if (!_zoneWasIn) { _zoneFreshTimer = 2.2; _zoneWasIn = true; }
+      if (!_zoneWasIn) { _zoneFreshTimer = 2.2; _zoneWasIn = true; playSound('zone_enter'); }
       if (_zoneFreshTimer > 0) {
         _zoneFreshTimer -= gameDt;
         alertOverlay.show('zone','prox-zone',
@@ -1120,6 +1273,15 @@ function updateHUD() {
     elZsVal.textContent = zone.limit;
   } else {
     elZoneSign.classList.add('zs-hidden');
+  }
+
+  // modifier hud badge
+  const modBadge = document.getElementById('modifier-hud-badge');
+  if (modBadge) {
+    modBadge.className = '';
+    if (store.diffModifier === 'easy') { modBadge.className = 'mod-easy'; modBadge.textContent = '🍃 easy mod'; }
+    else if (store.diffModifier === 'hard') { modBadge.className = 'mod-hard'; modBadge.textContent = '💀 hard mod'; }
+    else { modBadge.textContent = ''; }
   }
 
   // freerun banner
@@ -1593,6 +1755,9 @@ function update(ts) {
   // stop all game logic when not running or dead/dying
   if (!gameRunning || state.dead || state.dying) return;
 
+  // engine audio
+  updateEngineSound(state.speed);
+
   // timers
   if (state.zoneImmune)    { state.zoneImmuneTimer-=dt; if(state.zoneImmuneTimer<=0) state.zoneImmune=false; }
   if (state.frenzyTimer>0)   state.frenzyTimer-=dt;
@@ -1624,6 +1789,7 @@ function update(ts) {
     state.nitroCharges--;
     state.boostActive=true; state.boostTimer=BOOST_DUR;
     spawnLabel(state.carX,state.carY-42,'⚡ nitro!','#f4a261');
+    playSound('nitro');
     KEYS['ArrowUp']=false;
   }
 
@@ -1664,10 +1830,11 @@ function update(ts) {
     }
     state._lastScoredDist = curDist;
   }
+  const diffModMult = store.diffModifier === 'easy' ? 0.5 : store.diffModifier === 'hard' ? 2.0 : 1.0;
   const sm = (!m.noScore
     ? (activePowerups.has('triple_score')?3:1)*(activePowerups.has('double_score')?2:1)
       *(state.frenzyTimer>0?3:1)*m.scoreMult
-    : 0);
+    : 0) * diffModMult;
   if (currentMode !== 'freerun') state.score += state.speed*dt*0.1*sm;
 
   extendTerrain();
@@ -1712,6 +1879,7 @@ function update(ts) {
     if (Math.abs(carWX-b.wx)<44) {
       b.collected=true; state.boostActive=true; state.boostTimer=BOOST_DUR;
       spawnLabel(state.carX,state.carY-40,'⚡ boost!','#2ec4b6');
+      playSound('boost');
     }
   }
 
@@ -1723,7 +1891,7 @@ function update(ts) {
       s.collected=true;
       const gain=Math.round(s.value*sm);
       state.score+=gain;
-      if (gain>0) spawnLabel(state.carX,state.carY-42,`+${gain}`,'#f9c74f');
+      if (gain>0) { spawnLabel(state.carX,state.carY-42,`+${gain}`,'#f9c74f'); playSound('coin'); }
     }
   }
 
@@ -1790,10 +1958,13 @@ function die(reason) {
   document.getElementById('boost-menu').classList.add('hidden');
   spawnExplosion(state.carX,state.carY);
   dismissMathUI();
+  playSound('crash');
+  stopEngine();
 
-  // save score (no lifetime savings in freerun or ocean unless they earn it)
+  // save score — normally 60% saved; score_saver powerup keeps 100%
   const isFr = currentMode === 'freerun';
-  const saved = isFr ? 0 : (activePowerups.has('score_saver') ? Math.round(state.score*0.6) : state.score);
+  const keepFrac = activePowerups.has('score_saver') ? 1.0 : 0.6;
+  const saved = isFr ? 0 : Math.round(state.score * keepFrac);
   store.lifetime=Math.floor((store.lifetime||0)+saved);
   saveStore(store);
   refreshAllLifetimeDisplays();
@@ -1941,6 +2112,12 @@ function startGame() {
   hideSpeedWarning();
   alertOverlay.hideAll();
 
+  // init and start audio
+  initAudio();
+  stopEngine();
+  stopMusic();
+  setTimeout(() => { startEngine(); if (store.musicEnabled) startMusic(); }, 80);
+
   // consume queued power-ups
   activePowerups=new Set(store.ownedPowerups);
   store.ownedPowerups=[];
@@ -1992,6 +2169,7 @@ document.querySelectorAll('.mode-btn').forEach(btn=>{
 });
 
 document.getElementById('start-btn').addEventListener('click',()=>{
+  initAudio();
   const w=document.getElementById('welcome-screen');
   w.classList.add('fade-out');
   setTimeout(()=>{ w.style.display='none'; startGame(); },320);
@@ -2027,10 +2205,80 @@ document.getElementById('close-shop-btn').addEventListener('click',()=>{
 
 document.getElementById('reset-btn').addEventListener('click',()=>{
   if (confirm('reset lifetime score, all power-ups, and boost prices?')) {
-    store={lifetime:0,ownedPowerups:[],powerupCounts:{},boostCounts:{}};
+    store={lifetime:0,ownedPowerups:[],powerupCounts:{},boostCounts:{},
+           soundEnabled:true,musicEnabled:true,diffModifier:'normal'};
     saveStore(store);
     refreshAllLifetimeDisplays();
+    updateModifierBanner();
   }
+});
+
+// ══════════════════════════════════════════════════
+//  SETTINGS SCREEN
+// ══════════════════════════════════════════════════
+function updateModifierBanner() {
+  const banner = document.getElementById('modifier-active-banner');
+  if (!banner) return;
+  banner.className = 'mod-active-banner';
+  if (store.diffModifier === 'easy') {
+    banner.textContent = '🍃 easy modifier active — ×0.5 pts, +50% limits, no obstacles';
+    banner.classList.add('mod-easy');
+  } else if (store.diffModifier === 'hard') {
+    banner.textContent = '💀 hard modifier active — ×2 pts, −50% limits, ×3 obstacles';
+    banner.classList.add('mod-hard');
+  } else {
+    banner.classList.add('hidden');
+    return;
+  }
+  banner.classList.remove('hidden');
+}
+
+function buildSettingsScreen() {
+  // sync audio toggles
+  const soundBtn = document.getElementById('sound-toggle');
+  const musicBtn = document.getElementById('music-toggle');
+  if (soundBtn) { soundBtn.textContent = store.soundEnabled ? 'on' : 'off'; soundBtn.classList.toggle('active', store.soundEnabled); }
+  if (musicBtn) { musicBtn.textContent = store.musicEnabled ? 'on' : 'off'; musicBtn.classList.toggle('active', store.musicEnabled); }
+  // sync modifier buttons
+  document.querySelectorAll('.mod-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mod === store.diffModifier);
+  });
+}
+
+document.getElementById('sound-toggle').addEventListener('click', () => {
+  store.soundEnabled = !store.soundEnabled;
+  saveStore(store);
+  buildSettingsScreen();
+  if (!store.soundEnabled) stopEngine();
+  else if (gameRunning) { initAudio(); startEngine(); }
+});
+
+document.getElementById('music-toggle').addEventListener('click', () => {
+  store.musicEnabled = !store.musicEnabled;
+  saveStore(store);
+  buildSettingsScreen();
+  if (!store.musicEnabled) stopMusic();
+  else if (gameRunning) { initAudio(); startMusic(); }
+});
+
+document.querySelectorAll('.mod-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    store.diffModifier = btn.dataset.mod;
+    saveStore(store);
+    buildSettingsScreen();
+    updateModifierBanner();
+  });
+});
+
+document.getElementById('open-settings-btn').addEventListener('click', () => {
+  initAudio();
+  buildSettingsScreen();
+  document.getElementById('settings-screen').classList.remove('hidden');
+});
+
+document.getElementById('close-settings-btn').addEventListener('click', () => {
+  document.getElementById('settings-screen').classList.add('hidden');
+  updateModifierBanner();
 });
 
 // ══════════════════════════════════════════════════
@@ -2040,6 +2288,7 @@ state=initState();
 buildTerrain();
 state.carY=groundYAtWorldX(state.carX)-17;
 refreshAllLifetimeDisplays();
+updateModifierBanner();
 
 (function idleLoop(ts) {
   if (loopStarted) return;
