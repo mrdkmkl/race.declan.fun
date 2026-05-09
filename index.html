@@ -60,9 +60,12 @@
       <span class="lt-value" id="lifetime-display">0</span>
     </div>
 
+    <div id="modifier-active-banner" class="mod-active-banner hidden"></div>
+
     <div class="welcome-btns">
       <button class="pill-btn" id="start-btn">start</button>
       <button class="pill-btn ghost" id="open-shop-welcome">shop</button>
+      <button class="pill-btn ghost" id="open-settings-btn">⚙ settings</button>
     </div>
   </div>
 </div>
@@ -86,6 +89,7 @@
 
   <div id="hud-center">
     <div id="mode-badge"></div>
+    <div id="modifier-hud-badge"></div>
     <div id="freerun-banner" class="fr-hidden">no scoring · just drive</div>
   </div>
 
@@ -192,7 +196,48 @@
 <div id="toast"></div>
 
 <!-- ── VERSION BADGE ── -->
-<div id="version-badge">V.1.1.1</div>
+<div id="version-badge">V1.2.13</div>
+
+<!-- ── SETTINGS SCREEN ── -->
+<div id="settings-screen" class="hidden">
+  <div class="overlay-panel death-panel">
+    <div class="death-title">settings</div>
+    <div class="death-reason">audio &amp; difficulty modifiers</div>
+
+    <div class="section-label">audio</div>
+    <div class="settings-grid">
+      <div class="setting-row">
+        <span class="setting-label">🔊 sound effects</span>
+        <button class="toggle-btn active" id="sound-toggle">on</button>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">🎵 background music</span>
+        <button class="toggle-btn active" id="music-toggle">on</button>
+      </div>
+    </div>
+
+    <div class="section-label" style="margin-top:18px">difficulty modifier</div>
+    <p class="mod-subtitle">stacks on top of selected mode · affects all modes</p>
+    <div class="modifier-picker" id="modifier-picker">
+      <button class="mod-btn" data-mod="easy">
+        <span class="mod-name">🍃 easy</span>
+        <span class="mod-desc">+50% speed limits · no obstacles · ×0.5 pts</span>
+      </button>
+      <button class="mod-btn" data-mod="normal">
+        <span class="mod-name">● normal</span>
+        <span class="mod-desc">default rules · standard scoring</span>
+      </button>
+      <button class="mod-btn" data-mod="hard">
+        <span class="mod-name">💀 hard</span>
+        <span class="mod-desc">−50% speed limits · ×3 obstacles · ×2 pts</span>
+      </button>
+    </div>
+
+    <div class="death-btns" style="margin-top:18px">
+      <button class="pill-btn ghost" id="close-settings-btn">back</button>
+    </div>
+  </div>
+</div>
 
 <script src="game.js"></script>
 </body>
