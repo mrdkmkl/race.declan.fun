@@ -464,3 +464,77 @@ kbd{background:var(--ink);color:#fff;border-radius:4px;padding:2px 6px;font-fami
   pointer-events: none;
   user-select: none;
 }
+
+/* ──────────────────────────────
+   SETTINGS SCREEN
+────────────────────────────── */
+#settings-screen{
+  position:fixed;inset:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(10px) saturate(0.65);
+  background:rgba(255,255,255,0.22);
+}
+#settings-screen.hidden{display:none}
+
+.settings-grid{
+  display:flex;flex-direction:column;gap:8px;margin-bottom:4px;
+}
+.setting-row{
+  display:flex;align-items:center;justify-content:space-between;
+  background:#f7f7f7;border-radius:10px;padding:10px 14px;
+}
+.setting-label{font-size:11px;color:var(--ink)}
+
+.toggle-btn{
+  font-family:'DM Mono',monospace;font-size:11px;
+  padding:5px 16px;border-radius:100px;border:1.5px solid var(--line);
+  background:#fff;color:var(--muted);cursor:pointer;
+  transition:all 0.16s var(--ease);min-width:48px;
+}
+.toggle-btn.active{
+  background:var(--teal);border-color:var(--teal);
+  color:#fff;
+}
+
+/* ── MODIFIER PICKER ── */
+.mod-subtitle{
+  font-size:9px;color:var(--muted);margin-bottom:10px;letter-spacing:0.2px;
+}
+.modifier-picker{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:4px;
+}
+.mod-btn{
+  background:#fff;border:1.5px solid var(--line);border-radius:10px;
+  padding:10px 10px;cursor:pointer;text-align:left;
+  transition:border-color 0.16s,transform 0.14s var(--ease),box-shadow 0.16s;
+  font-family:'DM Mono',monospace;
+}
+.mod-btn:hover{border-color:var(--ink);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,0.07)}
+.mod-btn[data-mod="easy"].active{border-color:var(--teal);background:rgba(46,196,182,0.07)}
+.mod-btn[data-mod="normal"].active{border-color:var(--ink);background:#f8f8f8}
+.mod-btn[data-mod="hard"].active{border-color:var(--red);background:rgba(230,57,70,0.05)}
+.mod-name{display:block;font-size:10px;font-weight:500;color:var(--ink);margin-bottom:3px}
+.mod-desc{display:block;font-size:8px;color:var(--muted);line-height:1.4}
+
+/* ── MODIFIER ACTIVE BANNER (welcome screen) ── */
+.mod-active-banner{
+  display:flex;align-items:center;justify-content:center;
+  padding:5px 14px;border-radius:100px;font-size:9px;letter-spacing:0.3px;
+  margin-bottom:10px;border:1px solid;
+}
+.mod-active-banner.hidden{display:none}
+.mod-active-banner.mod-easy{
+  background:rgba(46,196,182,0.08);border-color:rgba(46,196,182,0.4);color:var(--teal);
+}
+.mod-active-banner.mod-normal{display:none}
+.mod-active-banner.mod-hard{
+  background:rgba(230,57,70,0.07);border-color:rgba(230,57,70,0.35);color:var(--red);
+}
+
+/* ── MODIFIER HUD BADGE ── */
+#modifier-hud-badge{
+  display:none;border-radius:100px;padding:3px 10px;font-size:9px;letter-spacing:0.3px;
+  background:rgba(255,255,255,0.9);border:1px solid var(--line);backdrop-filter:blur(4px);
+}
+#modifier-hud-badge.mod-easy{display:block;color:var(--teal);border-color:rgba(46,196,182,0.4)}
+#modifier-hud-badge.mod-hard{display:block;color:var(--red);border-color:rgba(230,57,70,0.4)}
