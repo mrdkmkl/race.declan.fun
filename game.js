@@ -3,6 +3,12 @@
 // ═══════════════════════════════════════════════════
 'use strict';
 
+// ══════════════════════════════════════════════════
+//  DEV MODE GATE — set to true to lock the site behind dev.html
+//  bypass code: 2013  (handled by dev.html)
+// ══════════════════════════════════════════════════
+const DEV_MODE = false;
+
 const canvas = document.getElementById('game-canvas');
 const ctx    = canvas.getContext('2d');
 
@@ -22,9 +28,10 @@ store.lifetime      = Number(store.lifetime)   || 0;
 store.ownedPowerups = store.ownedPowerups       || [];
 store.powerupCounts = store.powerupCounts       || {};
 store.boostCounts   = store.boostCounts         || {};
-store.soundEnabled  = store.soundEnabled  !== false;  // default true
-store.musicEnabled  = store.musicEnabled  !== false;  // default true
-store.diffModifier  = store.diffModifier  || 'normal'; // 'easy' | 'normal' | 'hard'
+store.soundEnabled     = store.soundEnabled  !== false;
+store.musicEnabled     = store.musicEnabled  !== false;
+store.diffModifier     = store.diffModifier  || 'normal';
+store.cheatHintHidden  = store.cheatHintHidden || false;
 saveStore(store);
 
 // ══════════════════════════════════════════════════
@@ -164,10 +171,10 @@ function stopMusic() {
 //  MODE CONFIG
 // ══════════════════════════════════════════════════
 const MODES = {
-  easy:    { label:'easy',      hillAmp:[65,26,9],   zoneInterval:1800, zoneBase:[70,90,110], obsInterval:950,    waterFreq:0,    scoreMult:1.0,  noZones:false, noObs:false, noWater:false, noScore:false },
-  medium:  { label:'medium',    hillAmp:[100,40,15],  zoneInterval:1200, zoneBase:[50,65,80],  obsInterval:600,    waterFreq:0.22, scoreMult:1.3,  noZones:false, noObs:false, noWater:false, noScore:false },
-  hard:    { label:'hard',      hillAmp:[135,55,20],  zoneInterval:800,  zoneBase:[38,52,65],  obsInterval:400,    waterFreq:0.42, scoreMult:1.8,  noZones:false, noObs:false, noWater:false, noScore:false },
-  water:   { label:'all water', hillAmp:[0,0,0],      zoneInterval:2500, zoneBase:[130,150,170,200], obsInterval:9999, waterFreq:0, scoreMult:1.5,  noZones:false, noObs:true,  noWater:true,  noScore:false },
+  easy:    { label:'easy',      hillAmp:[65,26,9],   zoneInterval:1800, zoneBase:[170,200,225], obsInterval:950,    waterFreq:0,    scoreMult:1.0,  noZones:false, noObs:false, noWater:false, noScore:false },
+  medium:  { label:'medium',    hillAmp:[100,40,15],  zoneInterval:1200, zoneBase:[170,190,210],  obsInterval:600,    waterFreq:0.22, scoreMult:1.3,  noZones:false, noObs:false, noWater:false, noScore:false },
+  hard:    { label:'hard',      hillAmp:[135,55,20],  zoneInterval:800,  zoneBase:[170,185,200],  obsInterval:400,    waterFreq:0.42, scoreMult:1.8,  noZones:false, noObs:false, noWater:false, noScore:false },
+  water:   { label:'all water', hillAmp:[0,0,0],      zoneInterval:2500, zoneBase:[170,195,215,240], obsInterval:9999, waterFreq:0, scoreMult:1.5,  noZones:false, noObs:true,  noWater:true,  noScore:false },
   freerun: { label:'free run',  hillAmp:[18,5,2],     zoneInterval:9999, zoneBase:[],          obsInterval:9999,   waterFreq:0,    scoreMult:0.0,  noZones:true,  noObs:true,  noWater:true,  noScore:true  },
 };
 let currentMode = 'easy';
@@ -214,6 +221,18 @@ const BOOST_DEFS = [
   },
   { id:'frenzy',      name:'score frenzy', desc:'3× score for 6 seconds',        icon:'🔥', baseCost:300,
     apply: s => { s.frenzyTimer = Math.max(s.frenzyTimer, 6); } },
+  { id:'space_launch', name:'space launch', desc:'10,000m ahead · 10s in orbit · +3,000 pts', icon:'🌌', baseCost:6000,
+    apply: s => {
+      s.score += 3000; _displayScore = s.score;
+      s.worldX += 225000; s.distance += 10000;
+      s.spaceLaunchTimer = 10;
+      s.speed = Math.max(s.speed, 100);
+      if (currentMode !== 'water') { extendTerrain(); s.carY = groundYAtWorldX(s.worldX + s.carX) - 17; }
+      spawnLabel(s.carX, s.carY - 60, '🌌 +3,000 · 10,000m!', '#7b68ee');
+      showToast('🌌 space launch! 10,000m ahead · +3,000 pts · 10s invincible');
+      invincibleTimer = Math.max(invincibleTimer, 10);
+    }
+  },
 ];
 
 // ══════════════════════════════════════════════════
@@ -249,22 +268,54 @@ function initState() {
     mathQuestion: '', mathAnswer: 0, mathInput: '', mathWrong: 0, mathPenaltyPending: 0,
     oceanObstacles: [],
     cruiseActive: false, cruiseSpeed: 0, cruiseTimer: 0, cruiseCooldown: 0,
+    permanentSpeed: 0,
+    _blazeActive: false,
+    storedBoosts: 0,
+    spaceLaunchTimer: 0,
+    // Night cycle — driven purely by distance % 2000, no phase state needed
+    nightT:      0,   // 0=full day, 1=full night (smoothly interpolated)
+    nightTarget: 0,
   };
 }
 
 // smooth display values (interpolated, never jumpy)
 let _displayScore = 0;
 let _displaySpd   = 0;
+let _displayDist  = 0;   // smoothed distance for HUD
+let rainbowMode   = false;
 
 // ══════════════════════════════════════════════════
 //  INPUT
 // ══════════════════════════════════════════════════
 const KEYS = {};
 window.addEventListener('keydown', e => {
+  // cheat lock captures digit input exclusively
+  if (cheatLockOpen) {
+    if (e.key === 'Escape') { closeCheatLock(); return; }
+    handleCheatLockKey(e.key);
+    e.preventDefault(); return;
+  }
   KEYS[e.key] = true;
-  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) e.preventDefault();
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
   if (e.key === 'Tab') { e.preventDefault(); toggleBoostMenu(); }
-  if (e.key === 'Escape') exitToMenu();
+  // Space = use a stored road boost
+  if (e.key === ' ') {
+    if (gameRunning && !state.dead && !state.dying && state.storedBoosts > 0) {
+      state.storedBoosts--;
+      state.speed      = Math.min(state.speed + ROAD_BOOST_MPH, state.maxSpeed);
+      state.boostActive = true;
+      state.boostTimer  = Math.max(state.boostTimer, ROAD_BOOST_DUR);
+      spawnLabel(state.carX, state.carY - 44, `⚡ +${ROAD_BOOST_MPH} mph!`, '#2ec4b6');
+      playSound('boost');
+      updateStoredBoostsHUD();
+    }
+  }
+  if (e.key === 'Escape') {
+    if (cheatMenuOpen) { closeCheatMenu(); return; }
+    if (sealMode) return;
+    exitToMenu();
+  }
+  if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) handleKonamiKey(e.key.toLowerCase());
 });
 window.addEventListener('keyup', e => { KEYS[e.key] = false; });
 
@@ -280,6 +331,12 @@ function exitToMenu() {
   dismissMathUI();
   stopEngine();
   stopMusic();
+  sealMode = false;
+  invincibleTimer = 0;
+  closeCheatMenu();
+  closeCheatLock();
+  konamiBuffer = '';
+  updateKonamiDisplay(null);
   const w = document.getElementById('welcome-screen');
   w.style.display = ''; w.classList.remove('fade-out');
   refreshAllLifetimeDisplays();
@@ -346,14 +403,16 @@ function maybeSpawnWater() {
   const m = MODES[currentMode];
   if (m.noWater || m.waterFreq === 0) return;
   const ahead = state.worldX + canvas.width;
-  if (ahead < nextWaterAt) return;
-  if (currentMode === 'water' || Math.random() < m.waterFreq) {
-    const len = currentMode === 'water' ? canvas.width * 1.5 : 200 + Math.random() * 340;
-    state.waterSegs.push({ wx: nextWaterAt, len });
+  // while loop so teleport gaps are filled
+  while (ahead >= nextWaterAt) {
+    if (currentMode === 'water' || Math.random() < m.waterFreq) {
+      const len = currentMode === 'water' ? canvas.width * 1.5 : 200 + Math.random() * 340;
+      state.waterSegs.push({ wx: nextWaterAt, len });
+    }
+    nextWaterAt += currentMode === 'water'
+      ? 60 + Math.random() * 80
+      : 550 + Math.random() * 600;
   }
-  nextWaterAt += currentMode === 'water'
-    ? 60 + Math.random() * 80
-    : 550 + Math.random() * 600;
 }
 
 function isInWaterAt(wx) {
@@ -376,9 +435,92 @@ function resetSpawnCounters() {
   nextOceanObsAt = 0;
 }
 
+let cheatDiffBase = 0;   // extra difficulty offset from cheat menu (persists per run)
+
 function diffScale() {
   if (activePowerups.has('slow_motion') || currentMode === 'freerun') return 1.0;
-  return Math.min(1.0 + (state.worldX / 20000) * 2.0, 3.0);
+  // Mode head-start: hard starts harder so switching easy→hard always feels harder at the start
+  const modeBase = { easy: 0, medium: 0.3, hard: 0.7, water: 0.4 }[currentMode] || 0;
+  // +0.05 per 200m driven — scales with distance, not score
+  const distBased = 1.0 + (state.distance / 200) * 0.05;
+  return Math.max(1.0, distBased + cheatDiffBase + modeBase);
+}
+
+// Controls get more sensitive (snappier gas/brake) on harder modes
+function getControlSens() {
+  const modeSens = { easy: 0.72, medium: 1.0, hard: 1.45, water: 1.1, freerun: 0.8 }[currentMode] || 1.0;
+  const modifierSens = store.diffModifier === 'easy' ? 0.75 : store.diffModifier === 'hard' ? 1.5 : 1.0;
+  return modeSens * modifierSens;
+}
+
+// ── Pre-generate entities before the run starts ──────────────────────────────
+// Called once in startGame() after resetSpawnCounters().
+// Seeds zones, boosts, obstacles, and coins for the first PRE_GEN_WX world units
+// so nothing pops in cold when the player first drives.
+const PRE_GEN_WX = 40000;   // how far ahead to pre-seed (world units)
+
+function preGenerateEntities() {
+  const m = MODES[currentMode];
+  const diff = 1.0;  // use base difficulty for pre-gen (player just started)
+  const horizon = PRE_GEN_WX;
+
+  // zones
+  if (!m.noZones && !activePowerups.has('no_zones')) {
+    while (nextZoneAt < horizon) {
+      const bases = m.zoneBase.map(b => Math.max(28, Math.round(b)));
+      const base  = bases[Math.floor(Math.random() * bases.length)];
+      let limit = activePowerups.has('slow_zones') ? Math.round(base * 1.6) : base;
+      if (store.diffModifier === 'easy') limit = Math.round(limit * 1.5);
+      if (store.diffModifier === 'hard') limit = Math.round(limit * 0.5);
+      const len = Math.max(250, 400 + Math.random() * 500);
+      state.zones.push({ wx: nextZoneAt, len, limit });
+      nextZoneAt += m.zoneInterval * (0.8 + Math.random() * 0.4);
+    }
+  }
+
+  // road boosts
+  while (nextBoostAt < horizon) {
+    state.roadBoosts.push({ wx: nextBoostAt + canvas.width * 0.8, collected: false, pulse: 0 });
+    nextBoostAt += (620 + Math.random() * 380);
+  }
+
+  // obstacles
+  const skipObs = m.noObs || activePowerups.has('no_obstacles') || store.diffModifier === 'easy';
+  if (!skipObs) {
+    while (nextObsAt < horizon) {
+      const type = Math.random() < 0.5 ? 'rock' : 'log';
+      state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9, type, hit: false });
+      const extraObs = store.diffModifier === 'hard' ? 2 : 0;
+      for (let ei = 0; ei < extraObs; ei++) {
+        state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + (ei + 1) * (140 + Math.random() * 80),
+          type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+      }
+      const obsIntervalMod = store.diffModifier === 'hard' ? 3 : 1;
+      nextObsAt += (m.obsInterval / obsIntervalMod) * (0.75 + Math.random() * 0.5);
+    }
+  } else {
+    nextObsAt = horizon;
+  }
+
+  // coins
+  while (nextScoreAt < horizon) {
+    const vals = [20, 30, 40, 50, 60, 80];
+    const val  = vals[Math.floor(Math.random() * vals.length)];
+    state.scorePickups.push({ wx: nextScoreAt + canvas.width * 0.65, value: val, collected: false, pulse: 0 });
+    nextScoreAt += (280 + Math.random() * 260);
+  }
+
+  // water
+  const wm = m;
+  if (!wm.noWater && wm.waterFreq > 0) {
+    while (nextWaterAt < horizon) {
+      if (Math.random() < wm.waterFreq) {
+        const len = 200 + Math.random() * 340;
+        state.waterSegs.push({ wx: nextWaterAt, len });
+      }
+      nextWaterAt += 550 + Math.random() * 600;
+    }
+  }
 }
 
 function maybeSpawnEntities() {
@@ -386,12 +528,11 @@ function maybeSpawnEntities() {
   const ahead = state.worldX + canvas.width;
   const diff  = diffScale();
 
-  // zones
-  if (!m.noZones && !activePowerups.has('no_zones') && ahead > nextZoneAt) {
+  // zones — while loop fills any gap left by teleports
+  while (!m.noZones && !activePowerups.has('no_zones') && ahead > nextZoneAt) {
     const bases = m.zoneBase.map(b => Math.max(28, Math.round(b / (1 + (diff - 1) * 0.55))));
     const base  = bases[Math.floor(Math.random() * bases.length)];
     let limit = activePowerups.has('slow_zones') ? Math.round(base * 1.6) : base;
-    // difficulty modifier tweaks
     if (store.diffModifier === 'easy') limit = Math.round(limit * 1.5);
     if (store.diffModifier === 'hard') limit = Math.round(limit * 0.5);
     const len   = Math.max(250, (400 + Math.random() * 500) * (1 + (diff - 1) * 0.4));
@@ -399,36 +540,39 @@ function maybeSpawnEntities() {
     nextZoneAt += (m.zoneInterval / diff) * (0.8 + Math.random() * 0.4);
   }
 
-  // road boosts
-  if (ahead > nextBoostAt) {
+  // road boosts — while loop fills teleport gaps
+  while (ahead > nextBoostAt) {
     state.roadBoosts.push({ wx: nextBoostAt + canvas.width * 0.8, collected: false, pulse: 0 });
     nextBoostAt += (620 + Math.random() * 380) / Math.sqrt(diff);
   }
 
-  // obstacles
+  // obstacles — while loop fills teleport gaps
   const skipObs = m.noObs || activePowerups.has('no_obstacles') || store.diffModifier === 'easy';
-  if (!skipObs && ahead > nextObsAt) {
-    const type = Math.random() < 0.5 ? 'rock' : 'log';
-    state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9, type, hit: false });
-    // hard modifier: 3× obstacles (spawn 2 extra)
-    const extraObs = store.diffModifier === 'hard' ? 2 : 0;
-    for (let ei = 0; ei < extraObs; ei++) {
-      state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + (ei + 1) * (140 + Math.random() * 80),
-        type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+  if (!skipObs) {
+    while (ahead > nextObsAt) {
+      const type = Math.random() < 0.5 ? 'rock' : 'log';
+      state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9, type, hit: false });
+      const extraObs = store.diffModifier === 'hard' ? 2 : 0;
+      for (let ei = 0; ei < extraObs; ei++) {
+        state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + (ei + 1) * (140 + Math.random() * 80),
+          type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+      }
+      if (diff > 1.8 && Math.random() < 0.35) {
+        state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + 180 + Math.random() * 120,
+          type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+      }
+      const obsIntervalMod = store.diffModifier === 'hard' ? 3 : 1;
+      nextObsAt += (m.obsInterval / diff / obsIntervalMod) * (0.75 + Math.random() * 0.5);
     }
-    if (diff > 1.8 && Math.random() < 0.35) {
-      state.obstacles.push({ wx: nextObsAt + canvas.width * 0.9 + 180 + Math.random() * 120,
-        type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
+  } else {
+    // skip mode — advance counter to catch up so it doesn't lag behind
+    while (nextObsAt < ahead) {
+      nextObsAt += (m.obsInterval / diff) * (0.75 + Math.random() * 0.5);
     }
-    // hard modifier: also tighten interval ÷3
-    const obsIntervalMod = store.diffModifier === 'hard' ? 3 : 1;
-    nextObsAt += (m.obsInterval / diff / obsIntervalMod) * (0.75 + Math.random() * 0.5);
-  } else if (skipObs && ahead > nextObsAt) {
-    nextObsAt += (m.obsInterval / diff) * (0.75 + Math.random() * 0.5); // keep advancing even when skipped
   }
 
-  // coins
-  if (ahead > nextScoreAt) {
+  // coins — while loop fills teleport gaps
+  while (ahead > nextScoreAt) {
     const vals = diff > 1.5 ? [50,60,80,80,100,120] : [20,30,40,50,60,80];
     const val  = vals[Math.floor(Math.random() * vals.length)];
     state.scorePickups.push({ wx: nextScoreAt + canvas.width * 0.65, value: val, collected: false, pulse: 0 });
@@ -537,21 +681,178 @@ const cloudDefs = [
   {ox:1320,oy:76,w:120,sp:0.14},{ox:1620,oy:58,w:100,sp:0.10},
 ];
 
+// ══════════════════════════════════════════════════
+//  NIGHT CYCLE
+// ══════════════════════════════════════════════════
+const NIGHT_CYCLE_M  = 2000; // total cycle length in metres (1000 day + 1000 night)
+const NIGHT_FADE_M   = 200;  // metres for each fade transition
+
+function updateNightCycle(dt) {
+  if (currentMode === 'freerun') {
+    state.nightTarget = 0;
+    state.nightT += (0 - state.nightT) * Math.min(dt * 3, 1);
+    return;
+  }
+
+  // Where are we in the 2000m cycle?
+  const phase = state.distance % NIGHT_CYCLE_M;
+
+  let target;
+  if (phase < 1000 - NIGHT_FADE_M) {
+    target = 0;                                          // full day
+  } else if (phase < 1000) {
+    target = (phase - (1000 - NIGHT_FADE_M)) / NIGHT_FADE_M; // fading to night
+  } else if (phase < 2000 - NIGHT_FADE_M) {
+    target = 1;                                          // full night
+  } else {
+    target = 1 - (phase - (2000 - NIGHT_FADE_M)) / NIGHT_FADE_M; // fading to day
+  }
+
+  state.nightTarget = Math.max(0, Math.min(1, target));
+  // Smooth lerp — speed proportional to distance from target so it never snaps
+  state.nightT += (state.nightTarget - state.nightT) * Math.min(dt * 2.8, 1);
+}
+
+function drawNightStars(ts, n) {
+  if (n < 0.04) return;
+  const skyH = canvas.height * BASE_Y_RATIO;
+  ctx.save();
+  _nightStars.forEach(s => {
+    const alpha = n * s.bright * (0.7 + 0.3 * Math.sin(ts * 0.001 * 1.3 + s.twinkle));
+    if (alpha < 0.02) return;
+    // very slow parallax drift with world scroll
+    const sx = ((s.fx * canvas.width - state.worldX * s.parallax) % canvas.width + canvas.width) % canvas.width;
+    const sy = s.fy * skyH;
+    ctx.beginPath();
+    ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,240,${alpha})`;
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawMoon(ts, n) {
+  if (n < 0.05) return;
+  // Safe zone: clear of all HUD. Speedometer is top-left ~130px. Right chips ~130px wide.
+  // Place moon in the sky, offset from center toward right, well below top HUD strip.
+  const moonR  = 28;
+  const moonX  = canvas.width  * 0.62;
+  const moonY  = Math.max(moonR + 195, canvas.height * BASE_Y_RATIO * 0.28);
+  const alpha  = Math.min(n * 1.4, 1);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // glow halo
+  const halo = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 3.2);
+  halo.addColorStop(0, 'rgba(255,255,220,0.18)');
+  halo.addColorStop(1, 'rgba(255,255,200,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(moonX, moonY, moonR * 3.2, 0, Math.PI * 2); ctx.fill();
+
+  // moon disc
+  ctx.beginPath(); ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(250,250,235,${0.92 * alpha})`; ctx.fill();
+
+  // shadow crescent (gives it a 3D look)
+  ctx.beginPath(); ctx.arc(moonX + moonR * 0.32, moonY - moonR * 0.1, moonR * 0.88, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(180,190,195,${0.38 * alpha})`; ctx.fill();
+
+  // subtle craters
+  const craters = [{dx:-9,dy:-6,r:4.5},{dx:7,dy:5,r:3},{dx:-3,dy:9,r:2.2},{dx:11,dy:-8,r:2}];
+  craters.forEach(c => {
+    ctx.beginPath(); ctx.arc(moonX+c.dx, moonY+c.dy, c.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(190,200,205,${0.28 * alpha})`; ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+function drawNightOverlay(n) {
+  if (n < 0.02) return;
+  ctx.save();
+  // Dark blue-black overlay — terrain, road, everything
+  ctx.fillStyle = `rgba(4, 8, 22, ${n * 0.60})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function drawHeadlightCones(angle) {
+  // called inside drawCar (already translated/rotated)
+  const n = gameRunning ? (state.nightT || 0) : 0;
+  if (n < 0.04) return;
+  const alpha = n * 0.26;
+  const len   = 170 + n * 100;
+
+  ctx.save();
+  // top headlight cone
+  const coneT = ctx.createLinearGradient(36, -5, 36 + len, -5);
+  coneT.addColorStop(0, `rgba(255,255,210,${alpha * 2.2})`);
+  coneT.addColorStop(1, 'rgba(255,255,180,0)');
+  ctx.beginPath();
+  ctx.moveTo(36, -5);
+  ctx.lineTo(36 + len, -58);
+  ctx.lineTo(36 + len, 12);
+  ctx.closePath();
+  ctx.fillStyle = coneT; ctx.fill();
+
+  // bottom headlight cone
+  const coneB = ctx.createLinearGradient(36, 3, 36 + len, 3);
+  coneB.addColorStop(0, `rgba(255,255,210,${alpha * 2.2})`);
+  coneB.addColorStop(1, 'rgba(255,255,180,0)');
+  ctx.beginPath();
+  ctx.moveTo(36, 3);
+  ctx.lineTo(36 + len, 12);
+  ctx.lineTo(36 + len, 60);
+  ctx.closePath();
+  ctx.fillStyle = coneB; ctx.fill();
+
+  // headlight bulbs
+  const bulbAlpha = Math.min(0.98, 0.35 + n * 0.65);
+  ctx.beginPath(); ctx.arc(35, -5, 3.8, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,210,${bulbAlpha})`; ctx.fill();
+  ctx.beginPath(); ctx.arc(35, 3, 3.8, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,210,${bulbAlpha})`; ctx.fill();
+
+  // dim rear tail lights
+  const tailAlpha = n * 0.7;
+  ctx.beginPath(); ctx.arc(-35, -5, 3, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(230,57,70,${tailAlpha})`; ctx.fill();
+  ctx.beginPath(); ctx.arc(-35, 3, 3, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(230,57,70,${tailAlpha})`; ctx.fill();
+
+  ctx.restore();
+}
+
 function drawBackground(ts) {
   if (currentMode === 'water') return; // drawOceanMode handles everything
-  const sky = ctx.createLinearGradient(0,0,0,canvas.height * BASE_Y_RATIO);
-  sky.addColorStop(0,'#f5f5f5'); sky.addColorStop(1,'#eeeeee');
-  ctx.fillStyle = sky; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const n = state.nightT || 0;
+
+  // Sky gradient — interpolates from day (#f5f5f5→#eee) to night (#050818→#0a1030)
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height * BASE_Y_RATIO);
+  const r0 = Math.round(245 - n * 240), g0 = Math.round(245 - n * 235), b0 = Math.round(245 - n * 210);
+  const r1 = Math.round(238 - n * 225), g1 = Math.round(238 - n * 224), b1 = Math.round(238 - n * 190);
+  sky.addColorStop(0, `rgb(${r0},${g0},${b0})`);
+  sky.addColorStop(1, `rgb(${r1},${g1},${b1})`);
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // distant hills
-  ctx.save(); ctx.globalAlpha=0.08; ctx.fillStyle='#888';
-  ctx.beginPath(); ctx.moveTo(0,canvas.height*BASE_Y_RATIO);
-  for (let x=0;x<=canvas.width;x+=16) {
-    const wx=x+state.worldX*0.26;
-    ctx.lineTo(x, canvas.height*BASE_Y_RATIO - 55 - Math.sin(wx/280)*38 - Math.sin(wx/110)*16);
+  ctx.save(); ctx.globalAlpha = 0.08; ctx.fillStyle = n > 0.5 ? '#112' : '#888';
+  ctx.beginPath(); ctx.moveTo(0, canvas.height * BASE_Y_RATIO);
+  for (let x = 0; x <= canvas.width; x += 16) {
+    const wx = x + state.worldX * 0.26;
+    ctx.lineTo(x, canvas.height * BASE_Y_RATIO - 55 - Math.sin(wx/280)*38 - Math.sin(wx/110)*16);
   }
-  ctx.lineTo(canvas.width,canvas.height*BASE_Y_RATIO); ctx.closePath(); ctx.fill(); ctx.restore();
-  drawClouds();
+  ctx.lineTo(canvas.width, canvas.height * BASE_Y_RATIO); ctx.closePath(); ctx.fill(); ctx.restore();
+
+  // Stars fade in with night, clouds fade out
+  if (n > 0.02) drawNightStars(ts, n);
+  if (n < 0.95) {
+    const cloudAlpha = 1 - n;
+    ctx.save(); ctx.globalAlpha = cloudAlpha; drawClouds(); ctx.restore();
+  }
+  // Moon
+  if (n > 0.08) drawMoon(ts, n);
 }
 
 function drawClouds() {
@@ -585,9 +886,19 @@ function drawOceanMode(ts) {
 
   // Sky
   const skyGrd = ctx.createLinearGradient(0,0,0,surfaceScreenY);
-  skyGrd.addColorStop(0,'#c8e6f5'); skyGrd.addColorStop(1,'#8ec8ef');
+  const n = state.nightT || 0;
+  if (n < 0.05) {
+    skyGrd.addColorStop(0,'#c8e6f5'); skyGrd.addColorStop(1,'#8ec8ef');
+  } else {
+    const r0 = Math.round(200 - n*196), g0 = Math.round(230 - n*220), b0 = Math.round(245 - n*220);
+    const r1 = Math.round(142 - n*138), g1 = Math.round(200 - n*192), b1 = Math.round(239 - n*220);
+    skyGrd.addColorStop(0, `rgb(${r0},${g0},${b0})`);
+    skyGrd.addColorStop(1, `rgb(${r1},${g1},${b1})`);
+  }
   ctx.fillStyle=skyGrd; ctx.fillRect(0,0,canvas.width,surfaceScreenY);
-  drawClouds();
+  if (n > 0.02) drawNightStars(null, n);
+  if (n > 0.08) drawMoon(t * 700, n);
+  if (n < 0.95) drawClouds();
 
   // Water — darkens with depth
   const wr=Math.round(74+(5-74)*darkT), wg2=Math.round(158+(15-158)*darkT), wb=Math.round(221+(40-221)*darkT);
@@ -964,6 +1275,10 @@ function drawCar(sx, sy, angle) {
     ctx.fillStyle='#e63946'; ctx.beginPath(); ctx.roundRect(-36,-26,72,45,5); ctx.fill();
     ctx.globalAlpha=1;
   }
+
+  // headlights + tail-lights (brightness driven by night cycle)
+  drawHeadlightCones(0);
+
   ctx.restore();
 }
 
@@ -1247,20 +1562,28 @@ function updateHUD() {
   elSpeedDig.textContent = spd;
   elSpeedDig.classList.toggle('boosting', state.boostActive);
 
-  // smooth score counter
+  // smooth score counter + pop animation on increase
+  const prevDisplayScore = Math.floor(_displayScore);
   _displayScore += (state.score - _displayScore) * 0.1;
-  elScore.textContent = Math.floor(_displayScore);
+  const newDisplayScore = Math.floor(_displayScore);
+  elScore.textContent = newDisplayScore;
   elTotal.textContent = Math.floor(store.lifetime + _displayScore);
+  if (newDisplayScore > prevDisplayScore && elScoreChip) {
+    elScoreChip.classList.add('score-up');
+    clearTimeout(elScoreChip._scoreUpTimer);
+    elScoreChip._scoreUpTimer = setTimeout(() => elScoreChip.classList.remove('score-up'), 280);
+  }
 
-  // distance
-  const dist = Math.floor(state.distance);
+  // smooth distance display
+  _displayDist += (state.distance - _displayDist) * 0.08;
+  const dist = Math.floor(_displayDist);
   elDist.textContent = dist >= 1000 ? (dist/1000).toFixed(1)+'km' : dist+'m';
 
-  // difficulty
+  // difficulty — unbounded, color ramps from green→red over 0–5×
   const diff = diffScale();
-  elDiff.textContent = diff.toFixed(1);
-  const t = (diff-1)/2;
-  elDiff.style.color = `rgb(${Math.round(17+t*210)},${Math.round(17+(1-t)*150)},${Math.round(17+(1-t)*80)})`;
+  elDiff.textContent = diff.toFixed(2);
+  const t = Math.min((diff - 1) / 5, 1);
+  elDiff.style.color = `rgb(${Math.round(17+t*213)},${Math.round(17+(1-t)*145)},${Math.round(17+(1-t)*75)})`;
 
   // zone limit chip — removed blink animation conflict by keeping display:flex always
   // and controlling opacity/transform via JS class
@@ -1310,10 +1633,12 @@ function updateHUD() {
     }
   }
 
-  // cruise control status chip
+  // cruise control chip — ONLY show if the powerup is active for this run
   const ccChip = document.getElementById('cruise-chip');
   if (ccChip) {
-    if (activePowerups.has('cruise_control') && gameRunning) {
+    const cruiseBought = activePowerups.has('cruise_control');
+    if (cruiseBought && gameRunning) {
+      ccChip.style.display = '';          // let CSS handle layout
       ccChip.classList.remove('chip-hidden');
       const ccVal = document.getElementById('cruise-val');
       if (ccVal) {
@@ -1330,6 +1655,7 @@ function updateHUD() {
       }
     } else {
       ccChip.classList.add('chip-hidden');
+      ccChip.style.display = 'none';      // belt-and-suspenders: force hidden
     }
   }
 
@@ -1448,6 +1774,11 @@ function refreshAllLifetimeDisplays() {
 //  PHYSICS & UPDATE
 // ══════════════════════════════════════════════════
 const ACCEL=108, BRAKE_S=165, BRAKE_H=280, FRICTION=34, BOOST_MULT=2.1, BOOST_DUR=4, GRAVITY=1050;
+const ROAD_BOOST_MPH = 20;   // instant speed bump when using a stored road boost
+const ROAD_BOOST_DUR = 2;    // seconds of boost-active for road boosts (space key / full pickup)
+
+// Car moves 2× faster visually; MPH display is unchanged
+const SCROLL_SPEED_MULT = 2.0; // world scrolls this many times faster than physics speed
 
 // ══════════════════════════════════════════════════
 //  OCEAN PHYSICS  (all-water mode)
@@ -1755,12 +2086,19 @@ function update(ts) {
   // stop all game logic when not running or dead/dying
   if (!gameRunning || state.dead || state.dying) return;
 
+  // freeze during seal invasion
+  if (sealMode) return;
+
+  // invincible timer
+  if (invincibleTimer > 0) { invincibleTimer -= dt; if (invincibleTimer < 0) invincibleTimer = 0; }
+
   // engine audio
   updateEngineSound(state.speed);
 
   // timers
   if (state.zoneImmune)    { state.zoneImmuneTimer-=dt; if(state.zoneImmuneTimer<=0) state.zoneImmune=false; }
   if (state.frenzyTimer>0)   state.frenzyTimer-=dt;
+  if (state.spaceLaunchTimer>0) state.spaceLaunchTimer-=dt;
 
   // cruise control timers
   if (state.cruiseActive) {
@@ -1797,11 +2135,12 @@ function update(ts) {
     // Cruise control: lock speed, ignore input
     state.speed = state.cruiseSpeed;
   } else if (!paused) {
-    const bf=state.boostActive?BOOST_MULT:1;
-    if      (accel>0)  state.speed+=ACCEL*bf*dt;
-    else if (accel<0)  state.speed-=(KEYS['ArrowDown']?BRAKE_H:BRAKE_S)*dt;
-    else               state.speed-=FRICTION*dt;
-    if (KEYS['ArrowUp']&&state.boostActive) state.speed+=ACCEL*0.55*dt;
+    const bf   = state.boostActive ? BOOST_MULT : 1;
+    const sens = getControlSens();
+    if      (accel>0)  state.speed += ACCEL * bf * sens * dt;
+    else if (accel<0)  state.speed -= (KEYS['ArrowDown'] ? BRAKE_H : BRAKE_S) * sens * dt;
+    else               state.speed -= FRICTION * dt;
+    if (KEYS['ArrowUp'] && state.boostActive) state.speed += ACCEL * 0.55 * sens * dt;
 
     // water drag (river mode only — ocean has own sinking physics)
     if (currentMode !== 'water' && state.inWater && !activePowerups.has('water_walk') && !activePowerups.has('no_obstacles'))
@@ -1809,36 +2148,51 @@ function update(ts) {
   }
 
   state.speed=Math.max(0, Math.min(state.maxSpeed, state.speed));
+  // permanent speed lock (set via cheat menu)
+  if (state.permanentSpeed > 0) {
+    state.speed = Math.min(state.permanentSpeed, state.maxSpeed);
+  }
   if (activePowerups.has('speed_floor') && state.speed>0 && state.speed<40)
     state.speed=40;
   if (state.boostActive) { state.boostTimer-=dt; if(state.boostTimer<=0) state.boostActive=false; }
 
-  // scroll world
-  const pps = state.speed*(canvas.width/380);
-  state.worldX  += pps*dt;
-  state.distance = state.worldX/10;
+  // scroll world (2× visual speed, MPH numbers shown at half)
+  const pps = state.speed * (canvas.width / 380) * SCROLL_SPEED_MULT;
+  state.worldX  += pps * dt;
+  // distance: screen-width-independent, physics-based (0.28 maps mph×dt → meters)
+  state.distance += state.speed * dt * 0.28;
 
   const m  = MODES[currentMode];
-  // Free-run: 1 point per 100m driven
+  // Free-run: 1 point per 200m driven (halved)
   if (currentMode === 'freerun') {
     const prevDist = state._lastScoredDist || 0;
     const curDist  = state.worldX / 10;
-    const newHundreds = Math.floor(curDist / 100) - Math.floor(prevDist / 100);
-    if (newHundreds > 0) {
-      state.score += newHundreds;
-      spawnLabel(state.carX, state.carY - 42, '+' + newHundreds + ' (100m)', '#7b68ee');
+    const newTwoHundreds = Math.floor(curDist / 200) - Math.floor(prevDist / 200);
+    if (newTwoHundreds > 0) {
+      state.score += newTwoHundreds;
+      spawnLabel(state.carX, state.carY - 42, '+' + newTwoHundreds + ' (200m)', '#7b68ee');
     }
     state._lastScoredDist = curDist;
   }
   const diffModMult = store.diffModifier === 'easy' ? 0.5 : store.diffModifier === 'hard' ? 2.0 : 1.0;
+  const frenzyMult  = state.frenzyTimer > 0 ? (state._blazeActive ? 10 : 3) : 1;
+  // clear blaze once frenzy expires
+  if (state.frenzyTimer <= 0 && state._blazeActive) state._blazeActive = false;
   const sm = (!m.noScore
     ? (activePowerups.has('triple_score')?3:1)*(activePowerups.has('double_score')?2:1)
-      *(state.frenzyTimer>0?3:1)*m.scoreMult
+      *frenzyMult*m.scoreMult
     : 0) * diffModMult;
-  if (currentMode !== 'freerun') state.score += state.speed*dt*0.1*sm;
+  // Travel scoring: halved base rate; 2× bonus for driving under 20 mph (rewards precision)
+  if (currentMode !== 'freerun') {
+    const slowBonus = state.speed < 20 ? 2.0 : 1.0;
+    state.score += state.speed * dt * 0.05 * sm * slowBonus;
+  }
 
   extendTerrain();
   maybeSpawnEntities();
+
+  // Night/day cycle — advance based on distance driven
+  updateNightCycle(dt);
 
   // ── OCEAN MODE: sinking physics ──
   const carWX = state.worldX + state.carX;
@@ -1873,13 +2227,23 @@ function update(ts) {
     }
   }
 
-  // road boosts
+  // road boosts — stored for manual use (Space), max 5
   for (const b of state.roadBoosts) {
     if (b.collected) continue;
     if (Math.abs(carWX-b.wx)<44) {
-      b.collected=true; state.boostActive=true; state.boostTimer=BOOST_DUR;
-      spawnLabel(state.carX,state.carY-40,'⚡ boost!','#2ec4b6');
+      b.collected=true;
+      if (state.storedBoosts < 5) {
+        state.storedBoosts++;
+        spawnLabel(state.carX, state.carY-40, `⚡ stored (${state.storedBoosts}/5)`, '#2ec4b6');
+      } else {
+        // already full — auto-use so it's not wasted (+20mph burst)
+        state.speed      = Math.min(state.speed + ROAD_BOOST_MPH, state.maxSpeed);
+        state.boostActive = true;
+        state.boostTimer  = Math.max(state.boostTimer, ROAD_BOOST_DUR);
+        spawnLabel(state.carX, state.carY-40, `⚡ +${ROAD_BOOST_MPH}! (full)`, '#2ec4b6');
+      }
       playSound('boost');
+      updateStoredBoostsHUD();
     }
   }
 
@@ -1912,9 +2276,10 @@ function update(ts) {
     return;
   }
 
-  // speed zone — 0.3s grace window
+  // speed zone — grace window tightens on hard mode (exact limit on hard)
   const zone=getActiveZone();
-  if (zone && !state.zoneImmune && state.speed>zone.limit*1.04) {
+  const zoneGrace = (currentMode==='hard' || store.diffModifier==='hard') ? 1.0 : 1.04;
+  if (zone && !state.zoneImmune && state.speed>zone.limit*zoneGrace) {
     if (!state.overSpeedActive) {
       state.overSpeedActive=true;
       state.overSpeedTimer=0.3;
@@ -1940,6 +2305,14 @@ function update(ts) {
 function die(reason) {
   if (state.dead || state.dying) return;
 
+  // invincible cheat — absorb the hit
+  if (invincibleTimer > 0) {
+    state.speed = Math.max(20, state.speed * 0.55);
+    spawnLabel(state.carX, state.carY - 52, `🛡 invincible! ${Math.ceil(invincibleTimer)}s`, '#7b68ee');
+    spawnExplosion(state.carX, state.carY);
+    return;
+  }
+
   // crash shield absorbs one fatal hit
   if (activePowerups.has('shield')) {
     activePowerups.delete('shield');
@@ -1955,6 +2328,9 @@ function die(reason) {
   state.deathReason=reason;
   state.overSpeedActive=false;
   boostMenuOpen=false;
+  // snap display score so HUD is 100% accurate at the moment of death
+  _displayScore = state.score;
+  _displaySpd   = state.speed;
   document.getElementById('boost-menu').classList.add('hidden');
   spawnExplosion(state.carX,state.carY);
   dismissMathUI();
@@ -2009,6 +2385,8 @@ function draw(ts) {
     drawObstacles();
   }
   if (!state.dead && !state.dying) {
+    // Night overlay darkens the world; drawn before the car so headlights sit on top
+    if ((state.nightT||0) > 0.01 && currentMode !== 'water') drawNightOverlay(state.nightT);
     drawCar(state.carX, state.carY, state.carAngle);
     if (!ocean) spawnSpeedTrail(state.carX, state.carY);
     else drawOceanBubbles(); // bubbles instead of speed trail
@@ -2016,6 +2394,102 @@ function draw(ts) {
   }
   drawFloatLabels();
   drawParticles();
+}
+
+// ══════════════════════════════════════════════════
+//  STORED BOOSTS HUD
+// ══════════════════════════════════════════════════
+function updateStoredBoostsHUD() {
+  const el = document.getElementById('stored-boosts-hud');
+  if (!el) return;
+  const shouldShow = gameRunning && !state.dead && !state.dying;
+  if (!shouldShow) { el.classList.remove('sb-visible'); return; }
+  el.classList.add('sb-visible');
+  const prev = el._prevCount ?? -1;
+  const cur  = state.storedBoosts;
+  const pips = [];
+  for (let i = 0; i < 5; i++) {
+    const filled = i < cur;
+    const popping = filled && i >= prev; // newly filled this update
+    pips.push(`<span class="sb-pip${filled ? ' sb-filled' : ''}${popping && prev !== -1 ? ' sb-pop' : ''}">${filled ? '⚡' : '·'}</span>`);
+  }
+  el.innerHTML = `<span class="sb-label">boosts</span>${pips.join('')}<span class="sb-hint">space</span>`;
+  el._prevCount = cur;
+}
+
+// ══════════════════════════════════════════════════
+//  SPACE LAUNCH OVERLAY
+// ══════════════════════════════════════════════════
+const _stars = Array.from({length:180}, () => ({
+  x: Math.random(), y: Math.random(),
+  r: 0.5 + Math.random() * 2,
+  spd: 0.003 + Math.random() * 0.012,
+  bright: 0.4 + Math.random() * 0.6,
+}));
+
+// Stars for the night-sky cycle (in sky portion only)
+const _nightStars = Array.from({length:140}, () => ({
+  fx:      Math.random(),                  // 0-1 fraction of canvas width
+  fy:      0.05 + Math.random() * 0.88,   // fraction of sky height (BASE_Y_RATIO band)
+  r:       0.4 + Math.random() * 1.6,
+  bright:  0.25 + Math.random() * 0.75,
+  twinkle: Math.random() * Math.PI * 2,   // phase offset for twinkling
+  parallax:0.01 + Math.random() * 0.04,   // very slow parallax factor
+}));
+
+function drawSpaceLaunchOverlay(ts) {
+  if (!state.spaceLaunchTimer || state.spaceLaunchTimer <= 0) return;
+  const alpha = Math.min(1, state.spaceLaunchTimer, (10 - state.spaceLaunchTimer) * 2 + 0.3);
+  ctx.save();
+  ctx.globalAlpha = Math.min(0.92, alpha);
+  ctx.fillStyle = '#000010';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // scrolling stars
+  const t = ts / 1000;
+  ctx.globalAlpha = alpha * 0.9;
+  _stars.forEach(s => {
+    const sx = ((s.x + t * s.spd) % 1) * canvas.width;
+    const sy = s.y * canvas.height;
+    ctx.beginPath();
+    ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${s.bright})`;
+    ctx.fill();
+  });
+
+  // orbiting earth glow
+  const ex = canvas.width * 0.5, ey = canvas.height * 0.78;
+  const eg = ctx.createRadialGradient(ex, ey, 20, ex, ey, 160);
+  eg.addColorStop(0, 'rgba(50,120,255,0.5)');
+  eg.addColorStop(0.5, 'rgba(30,80,200,0.18)');
+  eg.addColorStop(1, 'transparent');
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.fillStyle = eg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // car silhouette flying upward
+  const carSY = canvas.height * 0.35 - Math.sin(t * 0.8) * 18;
+  ctx.globalAlpha = alpha;
+  ctx.save(); ctx.translate(canvas.width * 0.5, carSY);
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.roundRect(-36,-12,72,16,5); ctx.fill();
+  ctx.fillStyle='rgba(180,220,255,0.5)'; ctx.beginPath(); ctx.roundRect(-16,-26,38,16,[7,7,0,0]); ctx.fill();
+  // rocket flame
+  for (let i=0;i<6;i++) {
+    ctx.beginPath(); ctx.arc(-10+i*4, 8+Math.sin(t*8+i)*4, 3+Math.random()*3, 0, Math.PI*2);
+    ctx.fillStyle=`rgba(80,200,255,${0.6-i*0.08})`; ctx.fill();
+  }
+  ctx.restore();
+
+  // countdown text
+  const remaining = Math.ceil(Math.max(0, state.spaceLaunchTimer));
+  ctx.globalAlpha = alpha;
+  ctx.font = 'bold 22px DM Sans, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(180,220,255,0.9)';
+  ctx.fillText(`🌌 in orbit — ${remaining}s`, canvas.width * 0.5, canvas.height * 0.18);
+  ctx.font = '13px DM Mono, monospace';
+  ctx.fillStyle = 'rgba(120,180,255,0.55)';
+  ctx.fillText('invincible · returning to earth…', canvas.width * 0.5, canvas.height * 0.23);
+  ctx.restore();
 }
 
 function drawCruiseIndicator() {
@@ -2083,10 +2557,16 @@ function drawOceanPickups() {
 function loop(ts) {
   update(ts);
   draw(ts);
+  if (rainbowMode && gameRunning && !state.dead) {
+    canvas.style.filter = `hue-rotate(${(ts * 0.07) % 360}deg) saturate(1.4)`;
+  }
+  drawSpaceLaunchOverlay(ts);   // space launch overlay (draws on top when active)
+  drawSealOverlay(ts);          // seal invasion overlay (draws on top when active)
   if (gameRunning) {
     updateHUD();
     updateSpeedWarning();
     drawActivePowerupBadges();
+    updateStoredBoostsHUD();
     updateProximityAlerts();
   }
   requestAnimationFrame(loop);
@@ -2103,10 +2583,12 @@ function startGame() {
   boostMenuOpen=false;
   _displayScore=0;
   _displaySpd=0;
+  _displayDist=0;
   _smoothSpd=0;
   _zoneWasIn=false;
   _zoneFreshTimer=0;
   gameDt=0;
+  if (rainbowMode) { rainbowMode=false; canvas.style.filter=''; }
 
   document.getElementById('boost-menu').classList.add('hidden');
   hideSpeedWarning();
@@ -2116,9 +2598,15 @@ function startGame() {
   initAudio();
   stopEngine();
   stopMusic();
+  sealMode = false; sealExploded = false; sealCountdown = 6; sealLastTs = null;
+  invincibleTimer = 0;
+  overdriveUnlocked = false;
+  closeCheatMenu();
+  closeCheatLock();
   setTimeout(() => { startEngine(); if (store.musicEnabled) startMusic(); }, 80);
 
-  // consume queued power-ups
+  // note: cheatDiffBase persists into the run intentionally (set via cheat menu)
+  // it resets only when explicitly changed by the player
   activePowerups=new Set(store.ownedPowerups);
   store.ownedPowerups=[];
   saveStore(store);
@@ -2139,6 +2627,7 @@ function startGame() {
     state.carY = groundYAtWorldX(state.carX) - 17;
   }
   resetSpawnCounters();
+  preGenerateEntities();  // seed zones/entities for first 40,000 world units before player moves
 
   // dismiss any lingering math quiz
   dismissMathUI();
@@ -2147,6 +2636,628 @@ function startGame() {
   gameRunning = true;
   refreshAllLifetimeDisplays();
   drawActivePowerupBadges();
+  updateStoredBoostsHUD();
+}
+
+// ══════════════════════════════════════════════════
+//  KONAMI / EASTER EGG CODES
+// ══════════════════════════════════════════════════
+let konamiBuffer    = '';
+let konamiDisplayTimer = null;
+let sealMode        = false;
+let sealSeals       = [];
+let sealCountdown   = 6;
+let sealExploded    = false;
+let sealLastTs      = null;
+let invincibleTimer = 0;
+let cheatMenuOpen   = false;
+let overdriveUnlocked = false;  // unlocked by Overdrive cheat; extends set-speed cap to 5000
+
+const KONAMI_SEAL = 'seal';
+const KONAMI_RACE = 'race';
+const KONAMI_WORDS = [KONAMI_SEAL, KONAMI_RACE];
+
+function handleKonamiKey(ch) {
+  konamiBuffer = (konamiBuffer + ch).slice(-4);
+
+  // find which word we're currently matching (longest suffix = prefix of a word)
+  let found = null;
+  for (const word of KONAMI_WORDS) {
+    for (let len = Math.min(word.length, konamiBuffer.length); len >= 1; len--) {
+      if (konamiBuffer.endsWith(word.slice(0, len))) {
+        if (!found || len > found.progress) found = { word, progress: len };
+        break;
+      }
+    }
+  }
+
+  updateKonamiDisplay(found);
+  clearTimeout(konamiDisplayTimer);
+  if (found) {
+    konamiDisplayTimer = setTimeout(() => {
+      updateKonamiDisplay(null);
+      konamiBuffer = '';
+    }, 3000);
+  }
+
+  // trigger on complete match
+  if (konamiBuffer.endsWith(KONAMI_SEAL) && gameRunning && !state.dead && !state.dying && !sealMode) {
+    konamiBuffer = '';
+    updateKonamiDisplay(null);
+    clearTimeout(konamiDisplayTimer);
+    triggerSealMode();
+  } else if (konamiBuffer.endsWith(KONAMI_RACE)) {
+    konamiBuffer = '';
+    updateKonamiDisplay(null);
+    clearTimeout(konamiDisplayTimer);
+    openCheatLock();   // password gate — opens cheat menu on success
+  }
+}
+
+function updateKonamiDisplay(found) {
+  const el = document.getElementById('konami-display');
+  if (!el) return;
+  if (!found) { el.classList.remove('kd-visible'); return; }
+  el.classList.add('kd-visible');
+  el.innerHTML = found.word.split('').map((ch, i) =>
+    i < found.progress
+      ? `<span class="kk-hit">${ch}</span>`
+      : `<span class="kk-dim">${ch}</span>`
+  ).join('');
+}
+
+// ─── SEAL INVASION ─────────────────────────────────
+function triggerSealMode() {
+  sealMode      = true;
+  sealSeals     = [];
+  sealCountdown = 6;
+  sealExploded  = false;
+  sealLastTs    = null;
+
+  const count = 14 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < count; i++) {
+    sealSeals.push({
+      x:          80 + Math.random() * (canvas.width  - 160),
+      y:          90 + Math.random() * (canvas.height - 200),
+      wobble:     Math.random() * Math.PI * 2,
+      wobbleSpd:  1.1 + Math.random() * 0.9,
+      size:       50 + Math.random() * 36,
+      rotation:   (Math.random() - 0.5) * 0.5,
+    });
+  }
+  showToast('🦭 SEAL INVASION — 6 seconds!');
+}
+
+function drawSealOverlay(ts) {
+  if (!sealMode) return;
+
+  // delta time for countdown
+  if (sealLastTs === null) sealLastTs = ts;
+  const dt2 = Math.min((ts - sealLastTs) / 1000, 0.05);
+  sealLastTs = ts;
+  if (!sealExploded) sealCountdown -= dt2;
+
+  // dim backdrop
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 5, 22, 0.60)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // header
+  const pulse = 1 + Math.sin(ts / 180) * 0.04;
+  ctx.save();
+  ctx.translate(canvas.width / 2, 55);
+  ctx.scale(pulse, pulse);
+  ctx.font = 'bold 32px DM Sans, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = 'rgba(46,196,182,0.5)'; ctx.shadowBlur = 20;
+  ctx.fillText('🦭  SEAL INVASION  🦭', 0, 0);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  const cd = Math.max(0, sealCountdown);
+  const urgent = cd < 2;
+
+  sealSeals.forEach(seal => {
+    seal.wobble += dt2 * seal.wobbleSpd;
+    const bob   = Math.sin(seal.wobble) * 7;
+    const shake = urgent ? (Math.random() - 0.5) * 10 : 0;
+
+    ctx.save();
+    ctx.translate(seal.x + shake, seal.y + bob);
+    ctx.rotate(seal.rotation + Math.sin(seal.wobble * 0.6) * 0.07);
+
+    // urgent glow pulse
+    if (urgent) {
+      ctx.beginPath();
+      ctx.arc(0, 0, seal.size * 0.58, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(230,57,70,${0.15 + Math.sin(ts / 80) * 0.10})`;
+      ctx.fill();
+    }
+
+    // emoji seal
+    ctx.font = `${seal.size}px serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🦭', 0, 0);
+
+    // countdown bubble
+    const by = seal.size * 0.58 + 16;
+    ctx.beginPath();
+    ctx.arc(0, by, 18, 0, Math.PI * 2);
+    ctx.fillStyle = urgent ? 'rgba(220,40,50,0.95)' : 'rgba(12,12,38,0.90)';
+    ctx.fill();
+    ctx.strokeStyle = urgent ? '#ff5060' : 'rgba(100,150,255,0.55)';
+    ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.font = `bold 14px DM Mono, monospace`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(Math.ceil(cd), 0, by);
+
+    ctx.restore();
+  });
+
+  ctx.restore();
+
+  // draw particles on top (explosions show through)
+  drawParticles();
+
+  // trigger explosion at zero
+  if (sealCountdown <= 0 && !sealExploded) {
+    sealExploded = true;
+    sealSeals.forEach(s => spawnExplosion(s.x, s.y));
+    playSound('crash');
+    showToast('💥 THE SEALS GOT YOU');
+    setTimeout(() => {
+      sealMode = false;
+      if (gameRunning && !state.dead && !state.dying) {
+        die('annihilated by seal invasion 🦭');
+      }
+    }, 750);
+  }
+}
+
+// ─── CHEAT LOCK ("race" triggers this first) ──────
+const CHEAT_CODE    = '201302';
+let cheatCodeBuffer = '';
+let cheatShowDigits = false;
+let cheatLockOpen   = false;
+
+function openCheatLock() {
+  cheatCodeBuffer = '';
+  cheatLockOpen   = true;
+  cheatShowDigits = false;
+  const hintEl = document.getElementById('cheat-lock-hint');
+  if (hintEl) hintEl.textContent = store.cheatHintHidden ? 'hint: [hidden]' : 'hint: birthday';
+  const showBtn = document.getElementById('cheat-show-btn');
+  if (showBtn) { showBtn.textContent = 'show'; showBtn.classList.remove('active'); }
+  const errEl = document.getElementById('cheat-lock-err');
+  if (errEl) errEl.classList.add('hidden');
+  renderCheatDigits();
+  document.getElementById('cheat-lock').classList.remove('hidden');
+}
+
+function closeCheatLock() {
+  cheatLockOpen   = false;
+  cheatCodeBuffer = '';
+  document.getElementById('cheat-lock').classList.add('hidden');
+}
+
+function renderCheatDigits() {
+  for (let i = 0; i < 6; i++) {
+    const slot = document.getElementById(`cd${i}`);
+    if (!slot) continue;
+    slot.classList.remove('cd-filled', 'cd-active');
+    if (i < cheatCodeBuffer.length) {
+      slot.textContent = cheatShowDigits ? cheatCodeBuffer[i] : '•';
+      slot.classList.add('cd-filled');
+    } else {
+      slot.textContent = '_';
+      if (i === cheatCodeBuffer.length) slot.classList.add('cd-active');
+    }
+  }
+}
+
+function handleCheatLockKey(key) {
+  if (!cheatLockOpen) return;
+  if (key === 'Backspace') {
+    cheatCodeBuffer = cheatCodeBuffer.slice(0, -1);
+    document.getElementById('cheat-lock-err').classList.add('hidden');
+    renderCheatDigits(); return;
+  }
+  if (!/^[0-9]$/.test(key) || cheatCodeBuffer.length >= 6) return;
+  cheatCodeBuffer += key;
+  renderCheatDigits();
+  if (cheatCodeBuffer.length === 6) {
+    if (cheatCodeBuffer === CHEAT_CODE) {
+      closeCheatLock(); openCheatMenu();
+    } else {
+      document.getElementById('cheat-lock-err').classList.remove('hidden');
+      const dg = document.getElementById('cheat-digits');
+      dg.classList.add('cd-shake');
+      setTimeout(() => { dg.classList.remove('cd-shake'); cheatCodeBuffer = ''; renderCheatDigits(); }, 550);
+    }
+  }
+}
+
+document.getElementById('cheat-show-btn').addEventListener('click', () => {
+  cheatShowDigits = !cheatShowDigits;
+  const btn = document.getElementById('cheat-show-btn');
+  btn.textContent = cheatShowDigits ? 'hide' : 'show';
+  btn.classList.toggle('active', cheatShowDigits);
+  renderCheatDigits();
+});
+document.getElementById('cheat-lock-cancel').addEventListener('click', closeCheatLock);
+
+// ─── CHEAT MENU (post-unlock) ──────────────────────
+const CHEATS = [
+  {
+    icon: '🏎', name: 'nitro surge',
+    desc: 'instantly hit 450 mph + 8s boost',
+    apply() {
+      state.speed = 450; state.boostActive = true; state.boostTimer = 8;
+      spawnLabel(state.carX, state.carY - 50, '🏎 NITRO SURGE!', '#2ec4b6');
+      showToast('🏎 Nitro surge — 450 mph!');
+    }
+  },
+  {
+    icon: '🛡', name: 'invincible',
+    desc: 'immune to all death for 30 seconds',
+    apply() {
+      invincibleTimer = 30;
+      spawnLabel(state.carX, state.carY - 50, '🛡 INVINCIBLE 30s!', '#7b68ee');
+      showToast('🛡 Invincible for 30 seconds!');
+    }
+  },
+  {
+    icon: '💰', name: 'score heist',
+    desc: '+100,000 lifetime points, no questions',
+    apply() {
+      store.lifetime += 100000; saveStore(store); refreshAllLifetimeDisplays();
+      spawnLabel(state.carX, state.carY - 50, '+100,000 💰', '#f9c74f');
+      showToast('💰 +100,000 points injected!');
+    }
+  },
+  {
+    icon: '🚫', name: 'zone buster',
+    desc: 'nuke every active speed limit zone',
+    apply() {
+      state.zones = []; state.overSpeedActive = false; hideSpeedWarning();
+      spawnLabel(state.carX, state.carY - 50, '🚫 ZONES NUKED', '#f4a261');
+      showToast('🚫 All speed limit zones destroyed!');
+    }
+  },
+  {
+    icon: '🌪', name: 'turbo warp',
+    desc: 'teleport 20,000 units ahead instantly',
+    apply() {
+      state.worldX += 20000;
+      if (currentMode !== 'water') { extendTerrain(); state.carY = groundYAtWorldX(state.worldX + state.carX) - 17; }
+      spawnLabel(state.carX, state.carY - 50, '🌪 WARPED!', '#7b68ee');
+      showToast('🌪 Teleported 20,000 units ahead!');
+    }
+  },
+  {
+    icon: '🌟', name: 'god run',
+    desc: 'ghost + no zones + no obstacles + ×3 score',
+    apply() {
+      ['ghost','no_zones','no_obstacles','triple_score','water_walk','speed_floor'].forEach(p => activePowerups.add(p));
+      drawActivePowerupBadges();
+      spawnLabel(state.carX, state.carY - 50, '🌟 GOD RUN!', '#f9c74f');
+      showToast('🌟 God mode — you are unstoppable!');
+    }
+  },
+  {
+    icon: '⚡', name: 'set difficulty',
+    desc: 'override starting difficulty for this run',
+    isSubPanel: true,
+    buildPanel(grid) {
+      const cur = diffScale().toFixed(2);
+      const presets = [1, 1.5, 2, 3, 5, 8, 10];
+      grid.innerHTML = `
+        <div class="diff-picker-inner">
+          <div class="dp-label">current difficulty: <b>×${cur}</b> &nbsp;|&nbsp; base offset: <b>${cheatDiffBase >= 0 ? '+' : ''}${cheatDiffBase.toFixed(2)}</b></div>
+          <div class="diff-presets">
+            ${presets.map(v => `<button class="pill-btn ghost diff-preset-btn${cheatDiffBase === v-1 ? ' dp-active':''}" data-val="${v}">start ×${v}</button>`).join('')}
+            <button class="pill-btn ghost diff-preset-btn${cheatDiffBase === 0 ? ' dp-active':''}" data-val="0">auto</button>
+          </div>
+          <button class="pill-btn ghost" id="diff-back-btn" style="margin-top:4px">← back to cheats</button>
+        </div>`;
+      grid.querySelectorAll('.diff-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const v = btn.dataset.val;
+          cheatDiffBase = v === '0' ? 0 : parseFloat(v) - 1;
+          showToast(`⚡ Difficulty base: ×${v === '0' ? 'auto' : v}`);
+          buildCheatMenu();
+        });
+      });
+      document.getElementById('diff-back-btn').addEventListener('click', buildCheatMenu);
+    }
+  },
+  {
+    icon: '🙈', name: 'hide hint',
+    desc: 'toggle "birthday" hint on the lock screen',
+    apply() {
+      store.cheatHintHidden = !store.cheatHintHidden; saveStore(store);
+      this.icon = store.cheatHintHidden ? '👁' : '🙈';
+      this.desc = store.cheatHintHidden ? 'hint is hidden — tap to show it again' : 'toggle "birthday" hint on the lock screen';
+      showToast(store.cheatHintHidden ? '🙈 Hint hidden from lock screen' : '👁 Hint visible on lock screen');
+      buildCheatMenu(); // rebuild to reflect new state
+    }
+  },
+  // ── NEW CHEATS ──────────────────────────────────────
+  {
+    icon: '🎯', name: 'set speed',
+    desc: 'lock your speed permanently this run',
+    isSubPanel: true,
+    buildPanel(grid) {
+      const maxV = overdriveUnlocked ? 5000 : 1000;
+      const curV = state.permanentSpeed > 0 ? state.permanentSpeed : Math.round(state.speed);
+      const presets = overdriveUnlocked
+        ? [50,100,200,300,500,750,1000,1500,2000,3000,5000]
+        : [50,100,200,300,500,750,1000];
+      grid.innerHTML = `
+        <div class="diff-picker-inner" style="grid-column:1/-1">
+          <div class="dp-label">
+            lock speed permanently this run
+            ${overdriveUnlocked ? '· <span style="color:var(--red);font-weight:600">⚡ overdrive active</span>' : ''}
+            ${state.permanentSpeed > 0 ? `· <span style="color:var(--teal)">currently ${state.permanentSpeed} mph</span>` : '· off'}
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:center;margin:12px 0 6px">
+            <input type="range"  id="spd-slider" min="1" max="${maxV}" value="${curV}" style="width:150px;accent-color:#111">
+            <input type="number" id="spd-num"    min="1" max="${maxV}" value="${curV}" style="width:80px;font-family:'DM Mono',monospace;font-size:14px;border:1.5px solid #ccc;border-radius:8px;padding:5px 8px;text-align:center">
+            <span style="font-size:11px;color:var(--muted)">mph</span>
+          </div>
+          <div class="diff-presets">
+            ${presets.map(v=>`<button class="pill-btn ghost diff-preset-btn" data-spd="${v}">${v}</button>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin:10px 0 4px;flex-wrap:wrap">
+            <button class="pill-btn" id="spd-lock-btn">🎯 lock speed</button>
+            <button class="pill-btn ghost danger" id="spd-off-btn">turn off</button>
+          </div>
+          <button class="pill-btn ghost" id="diff-back-btn" style="margin-top:4px">← back to cheats</button>
+        </div>`;
+      const slider = grid.querySelector('#spd-slider');
+      const numIn  = grid.querySelector('#spd-num');
+      slider.addEventListener('input', () => { numIn.value = slider.value; });
+      numIn.addEventListener('input', () => {
+        const v = Math.min(maxV, Math.max(1, parseInt(numIn.value)||1));
+        slider.value = v; numIn.value = v;
+      });
+      grid.querySelectorAll('[data-spd]').forEach(btn => {
+        btn.addEventListener('click', () => { slider.value = btn.dataset.spd; numIn.value = btn.dataset.spd; });
+      });
+      grid.querySelector('#spd-lock-btn').addEventListener('click', () => {
+        const v = Math.min(maxV, Math.max(1, parseInt(numIn.value)||50));
+        state.permanentSpeed = v;
+        state.maxSpeed = Math.max(state.maxSpeed, v);
+        spawnLabel(state.carX, state.carY - 50, `🎯 ${v} mph locked!`, '#2ec4b6');
+        showToast(`🎯 Speed permanently locked at ${v} mph`);
+        closeCheatMenu();
+      });
+      grid.querySelector('#spd-off-btn').addEventListener('click', () => {
+        state.permanentSpeed = 0;
+        showToast('🎯 Speed lock removed');
+        closeCheatMenu();
+      });
+      grid.querySelector('#diff-back-btn').addEventListener('click', buildCheatMenu);
+    }
+  },
+  {
+    icon: '⚡', name: 'overdrive',
+    desc: 'unlock 5000 mph cap for the set speed panel',
+    apply() {
+      overdriveUnlocked = !overdriveUnlocked;
+      this.icon = overdriveUnlocked ? '🔴' : '⚡';
+      this.desc = overdriveUnlocked
+        ? 'overdrive ON — 5000 mph cap enabled · tap to disable'
+        : 'unlock 5000 mph cap for the set speed panel';
+      if (overdriveUnlocked) {
+        state.maxSpeed = Math.max(state.maxSpeed, 5000);
+        spawnLabel(state.carX, state.carY - 50, '⚡ OVERDRIVE UNLOCKED!', '#e63946');
+        showToast('⚡ Overdrive ON — set speed now reaches 5000 mph!');
+      } else {
+        state.maxSpeed = Math.min(state.maxSpeed, state.permanentSpeed > 0 ? state.permanentSpeed : 500);
+        showToast('⚡ Overdrive OFF');
+      }
+      buildCheatMenu();
+    }
+  },
+  {
+    icon: '🪙', name: 'coin rain',
+    desc: 'spawn 25 coins directly ahead of you',
+    apply() {
+      const base = state.worldX + state.carX + 200;
+      for (let i = 0; i < 25; i++) {
+        state.scorePickups.push({
+          wx: base + i * 90 + Math.random() * 60,
+          value: 100 + Math.floor(Math.random() * 200),
+          collected: false, pulse: Math.random() * Math.PI * 2
+        });
+      }
+      spawnLabel(state.carX, state.carY - 50, '🪙 COIN RAIN!', '#f9c74f');
+      showToast('🪙 25 coins spawned ahead!');
+    }
+  },
+  {
+    icon: '✂️', name: 'nuke this zone',
+    desc: 'destroy only the speed zone you\'re currently in',
+    apply() {
+      const carWX = state.worldX + state.carX;
+      const before = state.zones.length;
+      state.zones = state.zones.filter(z => !(carWX >= z.wx && carWX <= z.wx + z.len));
+      const removed = before - state.zones.length;
+      if (removed > 0) {
+        state.overSpeedActive = false; hideSpeedWarning();
+        spawnLabel(state.carX, state.carY - 50, '✂️ ZONE NUKED', '#f4a261');
+        showToast('✂️ Current speed zone destroyed!');
+      } else {
+        showToast('✂️ No active zone to nuke right now');
+      }
+    }
+  },
+  {
+    icon: '🔋', name: 'full nitro',
+    desc: 'fill up 5 nitro charges right now',
+    apply() {
+      state.nitroCharges = Math.min((state.nitroCharges || 0) + 5, 9);
+      spawnLabel(state.carX, state.carY - 50, `⚡ ${state.nitroCharges} NITRO!`, '#f4a261');
+      showToast(`🔋 Nitro filled! You have ${state.nitroCharges} charges`);
+    }
+  },
+  {
+    icon: '🔥', name: 'score blaze',
+    desc: '×10 score multiplier for 20 seconds',
+    apply() {
+      state.frenzyTimer = Math.max(state.frenzyTimer, 20);
+      // Temporarily patch frenzy to be ×10 instead of ×3 for the duration
+      state._blazeActive = true;
+      spawnLabel(state.carX, state.carY - 50, '🔥 SCORE BLAZE ×10!', '#e63946');
+      showToast('🔥 Score Blaze! ×10 points for 20s');
+    }
+  },
+  {
+    icon: '🕶', name: 'ghost road',
+    desc: 'phase through every obstacle for this run',
+    apply() {
+      activePowerups.add('ghost');
+      activePowerups.add('water_walk');
+      drawActivePowerupBadges();
+      spawnLabel(state.carX, state.carY - 50, '🕶 GHOST ROAD!', '#7b68ee');
+      showToast('🕶 Ghost Road — nothing can stop you!');
+    }
+  },
+  // ── 4 NEW CHEATS ─────────────────────────────────
+  {
+    icon: '📍', name: 'set distance',
+    desc: 'teleport to any distance in this run',
+    isSubPanel: true,
+    buildPanel(grid) {
+      const cur = Math.floor(state.distance);
+      const presets = [500, 1000, 2500, 5000, 10000, 25000, 50000];
+      grid.innerHTML = `
+        <div class="diff-picker-inner" style="grid-column:1/-1">
+          <div class="dp-label">current distance: <b>${cur >= 1000 ? (cur/1000).toFixed(1)+'km' : cur+'m'}</b></div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:center;margin:12px 0 6px">
+            <input type="range"  id="dst-slider" min="0" max="100000" step="100" value="${cur}" style="width:150px;accent-color:#111">
+            <input type="number" id="dst-num"    min="0" max="100000" step="100" value="${cur}" style="width:90px;font-family:'DM Mono',monospace;font-size:14px;border:1.5px solid #ccc;border-radius:8px;padding:5px 8px;text-align:center">
+            <span style="font-size:11px;color:var(--muted)">m</span>
+          </div>
+          <div class="diff-presets">
+            ${presets.map(v=>`<button class="pill-btn ghost diff-preset-btn" data-dst="${v}">${v>=1000?(v/1000)+'km':v+'m'}</button>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin:10px 0 4px">
+            <button class="pill-btn" id="dst-go-btn">📍 teleport</button>
+          </div>
+          <button class="pill-btn ghost" id="diff-back-btn" style="margin-top:4px">← back to cheats</button>
+        </div>`;
+      const slider = grid.querySelector('#dst-slider');
+      const numIn  = grid.querySelector('#dst-num');
+      slider.addEventListener('input', () => { numIn.value = slider.value; });
+      numIn.addEventListener('input', () => {
+        const v = Math.min(100000, Math.max(0, parseInt(numIn.value)||0));
+        slider.value = v; numIn.value = v;
+      });
+      grid.querySelectorAll('[data-dst]').forEach(btn => {
+        btn.addEventListener('click', () => { slider.value = btn.dataset.dst; numIn.value = btn.dataset.dst; });
+      });
+      grid.querySelector('#dst-go-btn').addEventListener('click', () => {
+        const targetDist = Math.max(0, parseInt(numIn.value)||0);
+        const delta      = targetDist - state.distance;
+        // worldX advances proportionally (1m ≈ 22.5px at reference speed)
+        state.worldX   += delta * 22.5;
+        state.distance  = targetDist;
+        _displayDist    = targetDist;
+        if (currentMode !== 'water') { extendTerrain(); state.carY = groundYAtWorldX(state.worldX + state.carX) - 17; }
+        spawnLabel(state.carX, state.carY - 50, `📍 ${targetDist>=1000?(targetDist/1000).toFixed(1)+'km':targetDist+'m'}!`, '#7b68ee');
+        showToast(`📍 Teleported to ${targetDist>=1000?(targetDist/1000).toFixed(1)+'km':targetDist+'m'}`);
+        closeCheatMenu();
+      });
+      grid.querySelector('#diff-back-btn').addEventListener('click', buildCheatMenu);
+    }
+  },
+  {
+    icon: '🛸', name: 'max everything',
+    desc: 'fill boosts · 5 nitro · 8s turbo · zone shield',
+    apply() {
+      state.storedBoosts   = 5;
+      state.nitroCharges   = Math.max(state.nitroCharges, 5);
+      state.boostTimer     = Math.max(state.boostTimer, 8);
+      state.boostActive    = true;
+      state.zoneImmune     = true;
+      state.zoneImmuneTimer= Math.max(state.zoneImmuneTimer, 12);
+      updateStoredBoostsHUD();
+      drawActivePowerupBadges();
+      spawnLabel(state.carX, state.carY - 50, '🛸 MAX EVERYTHING!', '#f9c74f');
+      showToast('🛸 Boosts maxed · 5 nitro · 8s turbo · 12s zone shield!');
+    }
+  },
+  {
+    icon: '🌈', name: 'rainbow road',
+    desc: 'toggle psychedelic colour cycling on the canvas',
+    apply() {
+      rainbowMode = !rainbowMode;
+      if (!rainbowMode) canvas.style.filter = '';
+      this.icon = rainbowMode ? '⬛' : '🌈';
+      this.desc = rainbowMode ? 'rainbow is ON — tap to turn off' : 'toggle psychedelic colour cycling on the canvas';
+      spawnLabel(state.carX, state.carY - 50, rainbowMode ? '🌈 RAINBOW ON!' : '🌈 rainbow off', '#f9c74f');
+      showToast(rainbowMode ? '🌈 Rainbow road activated!' : '🌈 Rainbow road off');
+      buildCheatMenu();
+    }
+  },
+  {
+    icon: '💥', name: 'obstacle wipe',
+    desc: 'clear all hazards ahead · spawn 20 coins',
+    apply() {
+      const carWX = state.worldX + state.carX;
+      state.obstacles  = state.obstacles.filter(o => o.wx < carWX - 100);
+      state.waterSegs  = state.waterSegs.filter(w => w.wx + w.len < carWX - 100);
+      for (let i = 0; i < 20; i++) {
+        state.scorePickups.push({
+          wx: carWX + 250 + i * 110 + Math.random() * 60,
+          value: 150 + Math.floor(Math.random() * 250),
+          collected: false, pulse: Math.random() * Math.PI * 2
+        });
+      }
+      state.overSpeedActive = false; hideSpeedWarning();
+      spawnLabel(state.carX, state.carY - 50, '💥 CLEARED + 20 COINS!', '#f4a261');
+      showToast('💥 All hazards wiped — 20 coins spawned ahead!');
+    }
+  },
+];
+
+function openCheatMenu() {
+  if (state.dead || state.dying) return;
+  cheatMenuOpen = true;
+  buildCheatMenu();
+  document.getElementById('cheat-menu').classList.remove('hidden');
+}
+
+function closeCheatMenu() {
+  cheatMenuOpen = false;
+  document.getElementById('cheat-menu').classList.add('hidden');
+}
+
+function buildCheatMenu() {
+  const grid = document.getElementById('cheat-menu-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  CHEATS.forEach(cheat => {
+    const card = document.createElement('div');
+    card.className = 'shop-card cheat-card';
+    card.innerHTML = `
+      <div class="shop-card-icon">${cheat.icon}</div>
+      <div class="shop-card-name">${cheat.name}</div>
+      <div class="shop-card-desc">${cheat.desc}</div>
+      <div class="shop-card-cost cheat-free">free</div>`;
+    card.addEventListener('click', () => {
+      if (cheat.isSubPanel) {
+        cheat.buildPanel(grid);
+      } else {
+        if (gameRunning && !state.dead && !state.dying) cheat.apply();
+        closeCheatMenu();
+      }
+    });
+    grid.appendChild(card);
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -2172,8 +3283,14 @@ document.getElementById('start-btn').addEventListener('click',()=>{
   initAudio();
   const w=document.getElementById('welcome-screen');
   w.classList.add('fade-out');
-  setTimeout(()=>{ w.style.display='none'; startGame(); },320);
-  if (!loopStarted){ loopStarted=true; requestAnimationFrame(loop); }
+  const loadEl=document.getElementById('loading-screen');
+  if(loadEl) loadEl.classList.remove('hidden');
+  setTimeout(()=>{
+    w.style.display='none';
+    if(loadEl) loadEl.classList.add('hidden');
+    startGame();
+    if (!loopStarted){ loopStarted=true; requestAnimationFrame(loop); }
+  }, 2000);
 });
 
 document.getElementById('restart-btn').addEventListener('click',()=>{
@@ -2280,6 +3397,34 @@ document.getElementById('close-settings-btn').addEventListener('click', () => {
   document.getElementById('settings-screen').classList.add('hidden');
   updateModifierBanner();
 });
+
+document.getElementById('close-cheat-btn').addEventListener('click', closeCheatMenu);
+
+// ══════════════════════════════════════════════════
+//  DEV MODE GATE
+//  Controlled by DEV_MODE constant at top of file.
+//  Set DEV_MODE = true to lock the site.
+//  dev.html sets hillrider_devBypass='true' on correct code entry.
+// ══════════════════════════════════════════════════
+(function checkDevMode() {
+  try {
+    if (DEV_MODE && localStorage.getItem('hillrider_devBypass') !== 'true') {
+      window.location.replace('dev.html');
+    }
+  } catch(e) {}
+})();
+(function checkMobile() {
+  const ua = navigator.userAgent || '';
+  const isMobileUA  = /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTabletUA  = /iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  const isTouchSmall = navigator.maxTouchPoints > 1 && window.innerWidth < 1100;
+  if (isMobileUA || isTabletUA || isTouchSmall) {
+    const el = document.getElementById('mobile-block');
+    if (el) el.classList.remove('hidden');
+    // prevent canvas game from even starting
+    gameRunning = false;
+  }
+})();
 
 // ══════════════════════════════════════════════════
 //  IDLE PREVIEW (behind welcome screen)
