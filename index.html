@@ -27,7 +27,8 @@
       <span class="ctrl-item"><kbd>←</kbd> brake</span>
       <span class="ctrl-item"><kbd>↓</kbd> hard brake</span>
       <span class="ctrl-item"><kbd>↑</kbd> nitro</span>
-      <span class="ctrl-item"><kbd>Tab</kbd> boosts</span>
+      <span class="ctrl-item"><kbd>Space</kbd> use boost</span>
+      <span class="ctrl-item"><kbd>Tab</kbd> shop boosts</span>
       <span class="ctrl-item"><kbd>Esc</kbd> exit</span>
     </div>
 
@@ -178,6 +179,9 @@
 <!-- ── ACTIVE POWERUP BADGES ── -->
 <div id="active-powerups"></div>
 
+<!-- ── STORED BOOSTS BAR (bottom centre) ── -->
+<div id="stored-boosts-hud"></div>
+
 <!-- ── OCEAN DEPTH HUD ── -->
 <div id="depth-hud">
   <div class="depth-chip" id="depth-chip-m">
@@ -196,7 +200,7 @@
 <div id="toast"></div>
 
 <!-- ── VERSION BADGE ── -->
-<div id="version-badge">V1.2.13</div>
+<div id="version-badge">V1.3.9</div>
 
 <!-- ── SETTINGS SCREEN ── -->
 <div id="settings-screen" class="hidden">
@@ -236,6 +240,70 @@
     <div class="death-btns" style="margin-top:18px">
       <button class="pill-btn ghost" id="close-settings-btn">back</button>
     </div>
+  </div>
+</div>
+
+<!-- ── KONAMI KEY DISPLAY ── -->
+<div id="konami-display"></div>
+
+<!-- ── CHEAT LOCK SCREEN ── -->
+<div id="cheat-lock" class="hidden">
+  <div class="overlay-panel death-panel cheat-panel">
+    <div class="death-emoji">🔐</div>
+    <div class="death-title">enter code</div>
+    <div class="death-reason" id="cheat-lock-hint">hint: birthday</div>
+    <div class="cheat-digits" id="cheat-digits">
+      <span class="cd-slot" id="cd0">_</span>
+      <span class="cd-slot" id="cd1">_</span>
+      <span class="cd-slot" id="cd2">_</span>
+      <span class="cd-slot" id="cd3">_</span>
+      <span class="cd-slot" id="cd4">_</span>
+      <span class="cd-slot" id="cd5">_</span>
+    </div>
+    <div class="cheat-lock-err hidden" id="cheat-lock-err">✗ wrong code — try again</div>
+    <div class="cheat-lock-opts">
+      <button class="toggle-btn" id="cheat-show-btn">show</button>
+      <button class="pill-btn ghost" id="cheat-lock-cancel">cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── CHEAT MENU ("race") ── -->
+<div id="cheat-menu" class="hidden">
+  <div class="overlay-panel death-panel cheat-panel">
+    <div class="death-emoji">🎮</div>
+    <div class="death-title">cheat menu</div>
+    <div class="death-reason">type <kbd style="background:#e63946;color:#fff">race</kbd> anytime to open · <kbd>Esc</kbd> to close</div>
+    <div class="section-label" style="margin-top:14px">select a cheat</div>
+    <div id="cheat-menu-grid"></div>
+    <div class="death-btns" style="margin-top:14px">
+      <button class="pill-btn ghost" id="close-cheat-btn">close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MOBILE / TABLET BLOCK ── -->
+<div id="mobile-block" class="hidden">
+  <div class="mobile-block-inner">
+    <div class="mb-icon">🖥️</div>
+    <h1 class="mb-title">desktop only</h1>
+    <p class="mb-sub">hill rider needs a keyboard to play and isn't supported on mobile or tablet devices.</p>
+    <p class="mb-sub mb-hint">open this page on a laptop or desktop computer to start driving.</p>
+  </div>
+</div>
+
+<!-- ── REPORT ERROR BUTTON ── -->
+<a id="report-error-btn" href="https://forms.gle/LC7K6S8KTzNj9bzL9" target="_blank" rel="noopener noreferrer">
+  report an error
+</a>
+
+<!-- ── LOADING SCREEN ── -->
+<div id="loading-screen" class="hidden">
+  <div class="loading-inner">
+    <div class="loading-dots">
+      <span></span><span></span><span></span>
+    </div>
+    <div class="loading-text">generating track…</div>
   </div>
 </div>
 
