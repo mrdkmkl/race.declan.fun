@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>hill rider — not available</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;600&family=DM+Mono:wght@400;500&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink:   #f0f0f0;
+      --muted: #888;
+      --dim:   #555;
+      --line:  rgba(255,255,255,0.08);
+      --red:   #e63946;
+      --accent:#ccc;
+    }
+
+    /* ── Animated gradient background ── */
+    body {
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+      background: #000;
+    }
+
+    /* Layered moving gradient blobs */
+    body::before,
+    body::after {
+      content: '';
+      position: fixed;
+      inset: -40%;
+      border-radius: 50%;
+      animation: blobSpin 18s linear infinite;
+      z-index: 0;
+    }
+    body::before {
+      background: radial-gradient(ellipse at 40% 55%, #1a1a1a 0%, transparent 65%),
+                  radial-gradient(ellipse at 75% 30%, #2a2a2a 0%, transparent 60%),
+                  radial-gradient(ellipse at 20% 80%, #111 0%, transparent 55%);
+      animation-duration: 22s;
+    }
+    body::after {
+      background: radial-gradient(ellipse at 60% 40%, #222 0%, transparent 55%),
+                  radial-gradient(ellipse at 30% 70%, #181818 0%, transparent 60%);
+      animation-direction: reverse;
+      animation-duration: 16s;
+    }
+
+    @keyframes blobSpin {
+      0%   { transform: rotate(0deg)   scale(1);    }
+      33%  { transform: rotate(120deg) scale(1.08); }
+      66%  { transform: rotate(240deg) scale(0.96); }
+      100% { transform: rotate(360deg) scale(1);    }
+    }
+
+    /* Scanline shimmer overlay */
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,0.07) 3px,
+        rgba(0,0,0,0.07) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* ── Card ── */
+    .card {
+      position: relative;
+      z-index: 10;
+      max-width: 480px;
+      width: 90%;
+      padding: 52px 44px 40px;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 20px;
+      background: rgba(12,12,12,0.88);
+      backdrop-filter: blur(18px) saturate(0.6);
+      text-align: center;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .lock-icon {
+      font-size: 40px;
+      line-height: 1;
+      margin-bottom: 24px;
+      opacity: 0.7;
+    }
+
+    h1 {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 300;
+      font-size: 26px;
+      letter-spacing: -0.3px;
+      color: var(--ink);
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+
+    .subtitle a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+
+    /* ── Code entry ── */
+    .code-label {
+      font-size: 9px;
+      color: var(--dim);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .code-digits {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+
+    .cd-slot {
+      width: 46px;
+      height: 54px;
+      border: 1.5px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'DM Mono', monospace;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--ink);
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .cd-slot.filled {
+      border-color: rgba(255,255,255,0.28);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .cd-slot.error {
+      border-color: var(--red);
+      color: var(--red);
+      animation: shake 0.36s ease;
+    }
+
+    .cd-slot.success {
+      border-color: #2ec4b6;
+      color: #2ec4b6;
+    }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20%      { transform: translateX(-5px); }
+      50%      { transform: translateX(5px); }
+      80%      { transform: translateX(-3px); }
+    }
+
+    .code-hint {
+      font-size: 10px;
+      color: var(--dim);
+      margin-bottom: 10px;
+      min-height: 16px;
+      transition: color 0.15s;
+    }
+
+    .code-hint.err { color: #e63946; }
+    .code-hint.ok  { color: #2ec4b6; }
+
+    .code-instruction {
+      font-size: 9px;
+      color: rgba(255,255,255,0.12);
+      margin-top: 28px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Hidden real input that captures keypresses */
+    #real-input {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="scanlines"></div>
+
+<div class="card" id="card">
+  <div class="lock-icon">🔒</div>
+  <h1>website is not for public use yet</h1>
+  <p class="subtitle">
+    please contact <a href="mailto:mrdkmkl@gmail.com">declan</a> if this is not true.
+  </p>
+
+  <div class="code-label">enter access code</div>
+  <div class="code-digits">
+    <span class="cd-slot" id="d0">_</span>
+    <span class="cd-slot" id="d1">_</span>
+    <span class="cd-slot" id="d2">_</span>
+    <span class="cd-slot" id="d3">_</span>
+  </div>
+  <div class="code-hint" id="code-hint">type your 4-digit code</div>
+
+  <input id="real-input" type="tel" inputmode="numeric" maxlength="4" autocomplete="off"/>
+
+  <p class="code-instruction">tap / click anywhere to focus, then type</p>
+</div>
+
+<script>
+  const CORRECT = '2013';
+  const slots   = [
+    document.getElementById('d0'),
+    document.getElementById('d1'),
+    document.getElementById('d2'),
+    document.getElementById('d3'),
+  ];
+  const hintEl  = document.getElementById('code-hint');
+  const input   = document.getElementById('real-input');
+  let   typed   = '';
+  let   locked  = false;
+
+  // Focus hidden input on any click/tap
+  document.addEventListener('click', () => input.focus());
+  document.addEventListener('touchstart', () => input.focus(), { passive:true });
+  setTimeout(() => input.focus(), 200);
+
+  function render() {
+    slots.forEach((sl, i) => {
+      const ch = typed[i];
+      sl.textContent = ch ? '•' : '_';
+      sl.classList.toggle('filled', !!ch);
+      sl.classList.remove('error', 'success');
+    });
+    hintEl.className = 'code-hint';
+    hintEl.textContent = typed.length === 0 ? 'type your 4-digit code' : `${typed.length} / 4 digits`;
+  }
+
+  function flash(state) {
+    // state: 'error' | 'success'
+    slots.forEach(sl => sl.classList.add(state));
+    if (state === 'error') {
+      hintEl.className = 'code-hint err';
+      hintEl.textContent = '✗ wrong code — try again';
+      setTimeout(() => { typed = ''; input.value = ''; render(); }, 820);
+    } else {
+      hintEl.className = 'code-hint ok';
+      hintEl.textContent = '✓ access granted — entering…';
+      // Set bypass flag so game.js DEV_MODE gate lets you through
+      try { localStorage.setItem('hillrider_devBypass', 'true'); } catch(e) {}
+      setTimeout(() => window.location.replace('index.html'), 900);
+    }
+  }
+
+  input.addEventListener('input', () => {
+    if (locked) return;
+    // strip non-digits
+    const raw = input.value.replace(/\D/g,'').slice(0, 4);
+    input.value = raw;
+    typed = raw;
+    render();
+    if (typed.length === 4) {
+      locked = true;
+      setTimeout(() => {
+        if (typed === CORRECT) {
+          flash('success');
+        } else {
+          flash('error');
+          setTimeout(() => { locked = false; }, 830);
+        }
+      }, 120);
+    }
+  });
+
+  // Physical keyboard fallback (desktop)
+  document.addEventListener('keydown', e => {
+    if (locked) return;
+    if (e.key >= '0' && e.key <= '9' && typed.length < 4) {
+      typed += e.key;
+      input.value = typed;
+      render();
+      if (typed.length === 4) {
+        locked = true;
+        setTimeout(() => {
+          if (typed === CORRECT) {
+            flash('success');
+          } else {
+            flash('error');
+            setTimeout(() => { locked = false; }, 830);
+          }
+        }, 120);
+      }
+    } else if (e.key === 'Backspace') {
+      typed = typed.slice(0, -1);
+      input.value = typed;
+      render();
+    }
+  });
+
+  render();
+</script>
+</body>
+</html>
