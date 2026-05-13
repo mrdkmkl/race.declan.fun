@@ -538,3 +538,422 @@ kbd{background:var(--ink);color:#fff;border-radius:4px;padding:2px 6px;font-fami
 }
 #modifier-hud-badge.mod-easy{display:block;color:var(--teal);border-color:rgba(46,196,182,0.4)}
 #modifier-hud-badge.mod-hard{display:block;color:var(--red);border-color:rgba(230,57,70,0.4)}
+
+/* ──────────────────────────────
+   KONAMI KEY DISPLAY
+────────────────────────────── */
+#konami-display {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 400;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: rgba(10, 10, 30, 0.88);
+  border: 1.5px solid rgba(120, 160, 255, 0.4);
+  border-radius: 100px;
+  padding: 8px 20px;
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+}
+#konami-display.kd-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.kk-hit {
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  font-weight: 500;
+  color: #2ec4b6;
+  text-shadow: 0 0 8px rgba(46,196,182,0.7);
+  transition: color 0.1s;
+  text-transform: uppercase;
+}
+.kk-dim {
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  font-weight: 300;
+  color: rgba(150, 160, 200, 0.4);
+  text-transform: uppercase;
+}
+
+/* ──────────────────────────────
+   CHEAT MENU
+────────────────────────────── */
+#cheat-menu {
+  position: fixed; inset: 0; z-index: 110;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(10px) saturate(0.6);
+  background: rgba(10, 5, 25, 0.4);
+}
+#cheat-menu.hidden { display: none; }
+
+.cheat-panel { border-color: rgba(230,57,70,0.35); max-width: 480px; }
+
+#cheat-menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.cheat-card {
+  border-color: rgba(230,57,70,0.25) !important;
+  background: rgba(230,57,70,0.03) !important;
+}
+.cheat-card:hover {
+  border-color: var(--red) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(230,57,70,0.14) !important;
+}
+.cheat-free {
+  background: rgba(230,57,70,0.12) !important;
+  color: var(--red) !important;
+  font-weight: 500;
+}
+
+/* ──────────────────────────────
+   CHEAT LOCK SCREEN
+────────────────────────────── */
+#cheat-lock {
+  position: fixed; inset: 0; z-index: 115;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(12px) saturate(0.55);
+  background: rgba(10, 5, 25, 0.50);
+}
+#cheat-lock.hidden { display: none; }
+
+.cheat-digits {
+  display: flex; gap: 10px; justify-content: center;
+  margin: 18px 0 12px;
+}
+.cd-slot {
+  width: 40px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 500;
+  color: var(--ink);
+  background: #fff; border: 2px solid var(--line);
+  border-radius: 10px;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.cd-slot.cd-filled {
+  border-color: rgba(46,196,182,0.6);
+  background: rgba(46,196,182,0.05);
+  color: var(--teal);
+}
+.cd-slot.cd-active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(30,30,60,0.08);
+}
+
+.cheat-lock-err {
+  font-family: 'DM Mono', monospace; font-size: 11px;
+  color: var(--red); text-align: center; margin-bottom: 10px;
+}
+.cheat-lock-err.hidden { display: none; }
+
+.cheat-lock-opts {
+  display: flex; gap: 8px; justify-content: center; margin-top: 8px;
+}
+
+@keyframes cd-shake {
+  0%,100%{ transform: translateX(0); }
+  15%     { transform: translateX(-8px); }
+  35%     { transform: translateX(8px); }
+  55%     { transform: translateX(-6px); }
+  75%     { transform: translateX(6px); }
+}
+.cd-shake { animation: cd-shake 0.5s var(--ease); }
+
+/* difficulty picker inside cheat menu */
+.diff-picker-inner { text-align: center; grid-column: 1/-1; }
+.diff-picker-inner .dp-label {
+  font-size: 10px; color: var(--muted); margin-bottom: 10px;
+}
+.diff-presets {
+  display: flex; flex-wrap: wrap; gap: 7px; justify-content: center;
+  margin: 8px 0 12px;
+}
+.diff-preset-btn {
+  min-width: 56px; font-size: 11px !important; padding: 6px 14px !important;
+}
+.diff-preset-btn.dp-active {
+  background: var(--ink) !important; color: #fff !important;
+  border-color: var(--ink) !important;
+}
+
+/* ──────────────────────────────
+   MOBILE / TABLET BLOCK
+────────────────────────────── */
+#mobile-block {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Mono', monospace;
+}
+#mobile-block.hidden { display: none; }
+
+.mobile-block-inner {
+  max-width: 380px; width: 90%;
+  text-align: center;
+  padding: 40px 32px;
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(0,0,0,0.08);
+}
+.mb-icon {
+  font-size: 52px; line-height: 1; margin-bottom: 16px;
+}
+.mb-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 28px; font-weight: 300;
+  letter-spacing: -0.5px; margin-bottom: 10px;
+  color: var(--ink);
+}
+.mb-sub {
+  font-size: 12px; color: var(--muted);
+  line-height: 1.7; margin-bottom: 8px;
+}
+.mb-hint {
+  font-size: 10px; color: #aaa;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* ──────────────────────────────
+   REPORT ERROR BUTTON
+────────────────────────────── */
+#report-error-btn {
+  position: fixed;
+  bottom: 82px;
+  right: 12px;
+  z-index: 60;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: rgba(0,0,0,0.32);
+  text-decoration: none;
+  letter-spacing: 0.4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 100px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(4px);
+  transition: color 0.16s, border-color 0.16s, background 0.16s;
+}
+#report-error-btn:hover {
+  color: var(--red);
+  border-color: rgba(230,57,70,0.4);
+  background: rgba(255,255,255,0.95);
+}
+
+/* ── STORED BOOSTS HUD (bottom centre) ── */
+#stored-boosts-hud {
+  position: fixed;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 8, 18, 0.84);
+  border: 1px solid rgba(46,196,182,0.38);
+  border-radius: 100px;
+  padding: 7px 18px 7px 12px;
+  backdrop-filter: blur(12px);
+  z-index: 52;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
+  will-change: opacity, transform;
+}
+#stored-boosts-hud.sb-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.sb-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+  margin-right: 2px;
+  user-select: none;
+}
+.sb-pip {
+  font-size: 16px;
+  color: rgba(255,255,255,0.14);
+  line-height: 1;
+  transition: color 0.2s var(--ease), transform 0.2s var(--ease), text-shadow 0.2s;
+  will-change: transform;
+}
+.sb-pip.sb-filled {
+  color: #2ec4b6;
+  text-shadow: 0 0 10px rgba(46,196,182,0.85);
+  transform: scale(1.22);
+}
+.sb-pip.sb-pop {
+  animation: sbPop 0.38s var(--ease);
+}
+@keyframes sbPop {
+  0%   { transform: scale(1.22); }
+  40%  { transform: scale(1.55); filter: brightness(1.6); }
+  100% { transform: scale(1.22); }
+}
+.sb-hint {
+  font-size: 8px;
+  color: rgba(255,255,255,0.22);
+  letter-spacing: 0.3px;
+  margin-left: 4px;
+}
+
+/* ══════════════════════════════════════════════════
+   ANIMATION & SMOOTHING POLISH  (V1.3.7)
+══════════════════════════════════════════════════ */
+
+/* HUD chips — smoother value transitions + score pop */
+.hud-chip {
+  transition: opacity 0.28s var(--ease), transform 0.28s var(--ease),
+              border-color 0.25s, background 0.25s;
+}
+.chip-val {
+  transition: color 0.35s, transform 0.2s var(--ease);
+  display: inline-block;
+}
+.chip-val.val-pop {
+  animation: chipPop 0.32s var(--ease);
+}
+@keyframes chipPop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.22); color: var(--teal); }
+  100% { transform: scale(1); }
+}
+
+/* Score chip glows teal briefly on increase */
+#score-chip.score-up {
+  border-color: rgba(46,196,182,0.55);
+  background: rgba(46,196,182,0.07);
+  transition: border-color 0.18s, background 0.18s;
+}
+
+/* HUD chips slide in on game start */
+@keyframes chipIn {
+  from { opacity:0; transform: translateX(12px); }
+  to   { opacity:1; transform: translateX(0); }
+}
+#hud-right .hud-chip:nth-child(1) { animation: chipIn 0.35s var(--ease) 0.05s both; }
+#hud-right .hud-chip:nth-child(2) { animation: chipIn 0.35s var(--ease) 0.10s both; }
+#hud-right .hud-chip:nth-child(3) { animation: chipIn 0.35s var(--ease) 0.15s both; }
+#hud-right .hud-chip:nth-child(4) { animation: chipIn 0.35s var(--ease) 0.20s both; }
+#hud-right .hud-chip:nth-child(5) { animation: chipIn 0.35s var(--ease) 0.25s both; }
+
+/* Mode badge slide down */
+#mode-badge {
+  animation: modeIn 0.4s var(--ease) 0.08s both;
+  transition: background 0.2s, color 0.2s;
+}
+@keyframes modeIn {
+  from { opacity:0; transform: translateY(-8px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+
+/* Mode picker buttons — smoother active state */
+.mode-btn {
+  transition: border-color 0.18s, background 0.18s, transform 0.18s var(--ease), box-shadow 0.18s;
+}
+.mode-btn.active {
+  transform: scale(1.015);
+}
+.mode-btn:hover:not(.active) {
+  transform: translateY(-2px);
+}
+
+/* Zone sign — spring pop in */
+#zone-sign {
+  transition: opacity 0.3s var(--ease), transform 0.38s var(--ease);
+}
+#zone-sign:not(.zs-hidden) {
+  animation: zoneSignIn 0.38s var(--ease);
+}
+@keyframes zoneSignIn {
+  0%   { transform: scale(0.5) rotate(-8deg); opacity:0; }
+  65%  { transform: scale(1.1) rotate(2deg);  opacity:1; }
+  100% { transform: scale(1)   rotate(0deg);  opacity:1; }
+}
+
+/* Boost menu cards — stagger in */
+#boost-menu-grid .shop-card,
+#cheat-menu-grid .shop-card {
+  animation: cardIn 0.28s var(--ease) both;
+}
+#boost-menu-grid .shop-card:nth-child(1), #cheat-menu-grid .shop-card:nth-child(1)  { animation-delay:0.00s }
+#boost-menu-grid .shop-card:nth-child(2), #cheat-menu-grid .shop-card:nth-child(2)  { animation-delay:0.04s }
+#boost-menu-grid .shop-card:nth-child(3), #cheat-menu-grid .shop-card:nth-child(3)  { animation-delay:0.07s }
+#boost-menu-grid .shop-card:nth-child(4), #cheat-menu-grid .shop-card:nth-child(4)  { animation-delay:0.10s }
+#boost-menu-grid .shop-card:nth-child(5), #cheat-menu-grid .shop-card:nth-child(5)  { animation-delay:0.13s }
+#boost-menu-grid .shop-card:nth-child(6), #cheat-menu-grid .shop-card:nth-child(6)  { animation-delay:0.16s }
+#boost-menu-grid .shop-card:nth-child(7), #cheat-menu-grid .shop-card:nth-child(7)  { animation-delay:0.19s }
+#boost-menu-grid .shop-card:nth-child(8), #cheat-menu-grid .shop-card:nth-child(8)  { animation-delay:0.22s }
+#boost-menu-grid .shop-card:nth-child(n+9), #cheat-menu-grid .shop-card:nth-child(n+9) { animation-delay:0.25s }
+@keyframes cardIn {
+  from { opacity:0; transform: translateY(8px) scale(0.96); }
+  to   { opacity:1; transform: translateY(0) scale(1); }
+}
+
+/* Pill buttons — smoother press feel */
+.pill-btn {
+  transition: background 0.16s, border-color 0.16s, color 0.16s,
+              transform 0.14s var(--ease), box-shadow 0.16s;
+}
+.pill-btn:active { transform: scale(0.96); }
+.pill-btn.ghost:active { transform: scale(0.96); }
+
+/* Death screen score numbers count up feel */
+.sc-val {
+  transition: transform 0.4s var(--ease);
+  animation: scoreReveal 0.55s var(--ease) 0.18s both;
+}
+@keyframes scoreReveal {
+  from { opacity:0; transform: translateY(6px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+
+/* Toast — improved slide + scale */
+#toast {
+  transition: opacity 0.26s var(--ease), transform 0.26s var(--ease);
+}
+
+/* Active powerup badges — stagger on entry */
+.ap-badge {
+  animation: badgeIn 0.3s var(--ease) both;
+  transition: opacity 0.2s, transform 0.2s var(--ease);
+}
+@keyframes badgeIn {
+  from { opacity:0; transform: translateY(8px) scale(0.9); }
+  to   { opacity:1; transform: translateY(0) scale(1); }
+}
+
+/* Boost hint pill */
+#boost-hint {
+  transition: opacity 0.3s, transform 0.3s var(--ease);
+}
+
+/* Rainbow mode canvas filter transition */
+#game-canvas {
+  transition: filter 0.5s ease;
+}
+
+/* Proximity alerts — smoother pop */
+.prox-alert {
+  will-change: opacity, transform;
+}
+
+/* Cheat card click feedback */
+.cheat-card:active {
+  transform: scale(0.96) !important;
+  transition: transform 0.1s !important;
+}
