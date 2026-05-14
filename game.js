@@ -282,7 +282,8 @@ function initState() {
 let _displayScore = 0;
 let _displaySpd   = 0;
 let _displayDist  = 0;   // smoothed distance for HUD
-let rainbowMode   = false;
+let rainbowMode          = false;
+let terrainIntensityMult = 1.0;   // multiplied onto hill amplitudes; cheat-adjustable
 
 // ══════════════════════════════════════════════════
 //  INPUT
@@ -351,12 +352,13 @@ const BASE_Y_RATIO = 0.60;
 
 function terrainYAt(worldPx) {
   if (currentMode === 'water') return canvas.height * 0.52;
-  const a  = MODES[currentMode].hillAmp;
-  const sd = state.terrainSeed || 0;
+  const a    = MODES[currentMode].hillAmp;
+  const sd   = state.terrainSeed || 0;
+  const mult = terrainIntensityMult;
   return canvas.height * BASE_Y_RATIO
-    + Math.sin(worldPx / 1300 * 2.0 + sd) * a[0]
-    + Math.sin(worldPx / 420  * 3.5 + sd * 1.2) * a[1]
-    + Math.sin(worldPx / 190  * 5.3 + sd * 0.8) * a[2];
+    + Math.sin(worldPx / 1300 * 2.0 + sd) * a[0] * mult
+    + Math.sin(worldPx / 420  * 3.5 + sd * 1.2) * a[1] * mult
+    + Math.sin(worldPx / 190  * 5.3 + sd * 0.8) * a[2] * mult;
 }
 
 function buildTerrain() {
@@ -460,28 +462,28 @@ function getControlSens() {
 const PRE_GEN_WX = 40000;   // how far ahead to pre-seed (world units)
 
 function preGenerateEntities() {
-  const m = MODES[currentMode];
-  const diff = 1.0;  // use base difficulty for pre-gen (player just started)
+  const m    = MODES[currentMode];
+  const diff = diffScale();   // respect cheat difficulty offset + mode head-start
   const horizon = PRE_GEN_WX;
 
   // zones
   if (!m.noZones && !activePowerups.has('no_zones')) {
     while (nextZoneAt < horizon) {
-      const bases = m.zoneBase.map(b => Math.max(28, Math.round(b)));
+      const bases = m.zoneBase.map(b => Math.max(28, Math.round(b / (1 + (diff - 1) * 0.55))));
       const base  = bases[Math.floor(Math.random() * bases.length)];
       let limit = activePowerups.has('slow_zones') ? Math.round(base * 1.6) : base;
       if (store.diffModifier === 'easy') limit = Math.round(limit * 1.5);
       if (store.diffModifier === 'hard') limit = Math.round(limit * 0.5);
-      const len = Math.max(250, 400 + Math.random() * 500);
+      const len = Math.max(250, (400 + Math.random() * 500) * (1 + (diff - 1) * 0.4));
       state.zones.push({ wx: nextZoneAt, len, limit });
-      nextZoneAt += m.zoneInterval * (0.8 + Math.random() * 0.4);
+      nextZoneAt += (m.zoneInterval / diff) * (0.8 + Math.random() * 0.4);
     }
   }
 
   // road boosts
   while (nextBoostAt < horizon) {
     state.roadBoosts.push({ wx: nextBoostAt + canvas.width * 0.8, collected: false, pulse: 0 });
-    nextBoostAt += (620 + Math.random() * 380);
+    nextBoostAt += (620 + Math.random() * 380) / Math.sqrt(diff);
   }
 
   // obstacles
@@ -496,7 +498,7 @@ function preGenerateEntities() {
           type: Math.random() < 0.5 ? 'rock' : 'log', hit: false });
       }
       const obsIntervalMod = store.diffModifier === 'hard' ? 3 : 1;
-      nextObsAt += (m.obsInterval / obsIntervalMod) * (0.75 + Math.random() * 0.5);
+      nextObsAt += (m.obsInterval / diff / obsIntervalMod) * (0.75 + Math.random() * 0.5);
     }
   } else {
     nextObsAt = horizon;
@@ -504,19 +506,17 @@ function preGenerateEntities() {
 
   // coins
   while (nextScoreAt < horizon) {
-    const vals = [20, 30, 40, 50, 60, 80];
+    const vals = diff > 1.5 ? [50,60,80,80,100,120] : [20,30,40,50,60,80];
     const val  = vals[Math.floor(Math.random() * vals.length)];
     state.scorePickups.push({ wx: nextScoreAt + canvas.width * 0.65, value: val, collected: false, pulse: 0 });
-    nextScoreAt += (280 + Math.random() * 260);
+    nextScoreAt += (280 + Math.random() * 260) / Math.sqrt(diff);
   }
 
-  // water
-  const wm = m;
-  if (!wm.noWater && wm.waterFreq > 0) {
+  // water (river modes only — ocean mode renders differently, not via waterSegs)
+  if (!m.noWater && m.waterFreq > 0) {
     while (nextWaterAt < horizon) {
-      if (Math.random() < wm.waterFreq) {
-        const len = 200 + Math.random() * 340;
-        state.waterSegs.push({ wx: nextWaterAt, len });
+      if (Math.random() < m.waterFreq) {
+        state.waterSegs.push({ wx: nextWaterAt, len: 200 + Math.random() * 340 });
       }
       nextWaterAt += 550 + Math.random() * 600;
     }
@@ -2601,6 +2601,7 @@ function startGame() {
   sealMode = false; sealExploded = false; sealCountdown = 6; sealLastTs = null;
   invincibleTimer = 0;
   overdriveUnlocked = false;
+  terrainIntensityMult = 1.0;
   closeCheatMenu();
   closeCheatLock();
   setTimeout(() => { startEngine(); if (store.musicEnabled) startMusic(); }, 80);
@@ -2920,7 +2921,12 @@ const CHEATS = [
     icon: '🚫', name: 'zone buster',
     desc: 'nuke every active speed limit zone',
     apply() {
-      state.zones = []; state.overSpeedActive = false; hideSpeedWarning();
+      state.zones = [];
+      state.overSpeedActive = false;
+      hideSpeedWarning();
+      // reset so new zones spawn ahead (not stuck at pre-gen horizon)
+      const m = MODES[currentMode];
+      nextZoneAt = state.worldX + canvas.width * 1.2 + m.zoneInterval * (0.8 + Math.random() * 0.4);
       spawnLabel(state.carX, state.carY - 50, '🚫 ZONES NUKED', '#f4a261');
       showToast('🚫 All speed limit zones destroyed!');
     }
@@ -3222,6 +3228,75 @@ const CHEATS = [
       showToast('💥 All hazards wiped — 20 coins spawned ahead!');
     }
   },
+  {
+    icon: '🏔', name: 'regen track',
+    desc: 'new terrain seed · adjust hill intensity',
+    isSubPanel: true,
+    buildPanel(grid) {
+      const intensityPresets = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0];
+      const curMult = terrainIntensityMult.toFixed(2);
+      grid.innerHTML = `
+        <div class="diff-picker-inner" style="grid-column:1/-1">
+          <div class="dp-label">
+            hill intensity &nbsp;·&nbsp; current: <b>×${curMult}</b>
+            ${terrainIntensityMult > 2.5 ? ' &nbsp;<span style="color:var(--red);font-weight:600">⚠ extreme</span>' : ''}
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:center;margin:12px 0 6px">
+            <input type="range" id="int-slider" min="0.1" max="8" step="0.05"
+              value="${terrainIntensityMult}" style="width:170px;accent-color:#111">
+            <span style="font-size:14px;font-weight:600;min-width:40px;text-align:left" id="int-val">×${curMult}</span>
+          </div>
+          <div class="diff-presets" style="margin-bottom:10px">
+            ${intensityPresets.map(v =>
+              `<button class="pill-btn ghost diff-preset-btn${terrainIntensityMult === v ? ' dp-active':''}" data-int="${v}">×${v}</button>`
+            ).join('')}
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
+            <button class="pill-btn" id="regen-apply-btn">🏔 new seed + apply</button>
+            <button class="pill-btn ghost" id="int-only-btn">apply intensity only</button>
+          </div>
+          <button class="pill-btn ghost" id="diff-back-btn" style="margin-top:4px">← back to cheats</button>
+        </div>`;
+
+      const slider = grid.querySelector('#int-slider');
+      const valEl  = grid.querySelector('#int-val');
+
+      slider.addEventListener('input', () => {
+        valEl.textContent = '×' + parseFloat(slider.value).toFixed(2);
+      });
+      grid.querySelectorAll('[data-int]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          slider.value = btn.dataset.int;
+          valEl.textContent = '×' + parseFloat(btn.dataset.int).toFixed(2);
+        });
+      });
+
+      function applyTerrain(newSeed) {
+        terrainIntensityMult = Math.max(0.05, parseFloat(slider.value));
+        if (newSeed) state.terrainSeed = Math.random() * 10000;
+        buildTerrain();
+        extendTerrain();
+        if (currentMode !== 'water') {
+          state.carY  = groundYAtWorldX(state.worldX + state.carX) - 17;
+          state.carVY = 0;
+        }
+      }
+
+      grid.querySelector('#regen-apply-btn').addEventListener('click', () => {
+        applyTerrain(true);
+        spawnLabel(state.carX, state.carY - 50, `🏔 NEW TRACK ×${terrainIntensityMult.toFixed(2)}!`, '#7b68ee');
+        showToast(`🏔 Track regenerated · intensity ×${terrainIntensityMult.toFixed(2)}`);
+        closeCheatMenu();
+      });
+      grid.querySelector('#int-only-btn').addEventListener('click', () => {
+        applyTerrain(false);
+        spawnLabel(state.carX, state.carY - 50, `🏔 intensity ×${terrainIntensityMult.toFixed(2)}`, '#7b68ee');
+        showToast(`🏔 Intensity set to ×${terrainIntensityMult.toFixed(2)}`);
+        closeCheatMenu();
+      });
+      grid.querySelector('#diff-back-btn').addEventListener('click', buildCheatMenu);
+    }
+  },
 ];
 
 function openCheatMenu() {
@@ -3284,12 +3359,17 @@ document.getElementById('start-btn').addEventListener('click',()=>{
   const w=document.getElementById('welcome-screen');
   w.classList.add('fade-out');
   const loadEl=document.getElementById('loading-screen');
-  if(loadEl) loadEl.classList.remove('hidden');
+  // fade in — rAF ensures transition fires after layout paint
+  if(loadEl) requestAnimationFrame(()=>{ loadEl.classList.add('visible'); });
   setTimeout(()=>{
     w.style.display='none';
-    if(loadEl) loadEl.classList.add('hidden');
-    startGame();
-    if (!loopStarted){ loopStarted=true; requestAnimationFrame(loop); }
+    // start fade-out, then wait for 450ms transition before starting game
+    // so the canvas isn't blank behind the still-visible loading screen
+    if(loadEl){ loadEl.classList.remove('visible'); }
+    setTimeout(()=>{
+      startGame();
+      if (!loopStarted){ loopStarted=true; requestAnimationFrame(loop); }
+    }, 450);
   }, 2000);
 });
 
